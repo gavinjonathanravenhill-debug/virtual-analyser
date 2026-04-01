@@ -1,11 +1,25 @@
 import os, requests
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, Response
+import functools
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
 MORALIS_API_KEY = os.environ.get("MORALIS_API_KEY", "")
+SITE_PASSWORD = os.environ.get("SITE_PASSWORD", "virtual123")
+
+def check_auth(password):
+    return password == SITE_PASSWORD
+
+def requires_auth(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.password):
+            return Response("Login required", 401, {"WWW-Authenticate": "Basic realm=\"Virtual Analyser\""})
+        return f(*args, **kwargs)
+    return decorated
 HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY", "")
 
 @app.route("/")
