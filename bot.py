@@ -214,7 +214,3 @@ def check_holder_changes():
             name = next((h["name"] for h in holders if h["address"] == addr), sh(addr))
             direction = "📈 INCREASED" if change > 0 else "📉 DECREASED"
             alerts.append(f"{direction}: {name or sh(addr)}\n{prev:.2f}% -> {pct:.2f}% ({change:+.2f}%)")
-git push
-git add .
-git commit -m "rewrite bot with pure requests, no async"
-git push
