@@ -4,3 +4,4 @@ requests
 gunicorn
 python-telegram-bot==20.7
 apscheduler
+gevent
