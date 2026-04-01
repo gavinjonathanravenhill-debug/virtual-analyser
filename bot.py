@@ -215,6 +215,22 @@ def check_holder_changes():
             direction = "📈 INCREASED" if change > 0 else "📉 DECREASED"
             alerts.append(f"{direction}: {name or sh(addr)}\n{prev:.2f}% -> {pct:.2f}% ({change:+.2f}%)")
 
+
+def daily_summary():
+    holders = get_holders()
+    if not holders:
+        return
+    top10 = holders[:10]
+    t10p = sum(h["pct"] for h in top10)
+    t3p  = sum(h["pct"] for h in top10[:3])
+    lines = ["📅 <b>Daily VIRTUAL Summary</b>\n"]
+    for i, h in enumerate(top10, 1):
+        lines.append(f"{i}. {h["name"] or sh(h["address"])} — <b>{h["pct"]:.2f}%</b>")
+    lines.append(f"\nTop 3: <b>{t3p:.1f}%</b> | Top 10: <b>{t10p:.1f}%</b>")
+    btc, virt = get_prices()
+    lines.append(f"\nBTC: <b>${btc:,.0f}</b> | VIRTUAL: <b>${virt:.4f}</b>")
+    send("\n".join(lines))
+
 def run_bot():
     if not BOT_TOKEN:
         print("No TELEGRAM_BOT_TOKEN set — bot disabled")
