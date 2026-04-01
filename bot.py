@@ -253,7 +253,9 @@ def run_bot():
         await app.updater.start_polling()
         await asyncio.Event().wait()
 
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())
 
 def start_bot_thread():
     t = threading.Thread(target=run_bot, daemon=True)
