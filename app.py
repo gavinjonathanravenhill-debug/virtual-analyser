@@ -3,6 +3,7 @@ from flask import Flask, jsonify, render_template_string, request, Response
 import functools
 from flask_cors import CORS
 from bot import start_bot_thread
+start_bot_thread()
 
 app = Flask(__name__)
 CORS(app)
