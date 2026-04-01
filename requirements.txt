@@ -2,3 +2,5 @@ flask
 flask-cors
 requests
 gunicorn
+python-telegram-bot==20.7
+apscheduler

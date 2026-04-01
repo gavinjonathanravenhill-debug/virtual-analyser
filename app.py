@@ -2,6 +2,7 @@ import os, requests
 from flask import Flask, jsonify, render_template_string, request, Response
 import functools
 from flask_cors import CORS
+from bot import start_bot_thread
 
 app = Flask(__name__)
 CORS(app)
@@ -116,4 +117,5 @@ if __name__ == "__main__":
     print("  Open: http://127.0.0.1:5000\n")
     if not MORALIS_API_KEY:
         print("  ⚠  Set key: export MORALIS_API_KEY=your_key\n")
+    start_bot_thread()
     app.run(debug=False, port=5000)
