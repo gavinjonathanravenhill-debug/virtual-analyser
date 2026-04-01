@@ -214,10 +214,6 @@ def check_holder_changes():
             name = next((h["name"] for h in holders if h["address"] == addr), sh(addr))
             direction = "📈 INCREASED" if change > 0 else "📉 DECREASED"
             alerts.append(f"{direction}: {name or sh(addr)}\n{prev:.2f}% -> {pct:.2f}% ({change:+.2f}%)")
-sed -i '' 's/python-telegram-bot==20.7/python-telegram-bot==13.15/' requirements.txt
-sed -i '' '/python-telegram-bot/d' requirements.txt
-git add .
-git commit -m "rewrite bot with pure requests, no async"
 git push
 git add .
 git commit -m "rewrite bot with pure requests, no async"
