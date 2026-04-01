@@ -214,3 +214,25 @@ def check_holder_changes():
             name = next((h["name"] for h in holders if h["address"] == addr), sh(addr))
             direction = "📈 INCREASED" if change > 0 else "📉 DECREASED"
             alerts.append(f"{direction}: {name or sh(addr)}\n{prev:.2f}% -> {pct:.2f}% ({change:+.2f}%)")
+
+def run_bot():
+    if not BOT_TOKEN:
+        print("No TELEGRAM_BOT_TOKEN set — bot disabled")
+        return
+    print("Bot starting…")
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(check_price_alerts,  "interval", minutes=1)
+    scheduler.add_job(check_holder_changes,"interval", minutes=30)
+    scheduler.add_job(daily_summary,       "cron",     hour=8, minute=0)
+    scheduler.start()
+    while True:
+        try:
+            process_updates()
+        except Exception as e:
+            print(f"Bot error: {e}")
+            time.sleep(5)
+        time.sleep(1)
+
+def start_bot_thread():
+    t = threading.Thread(target=run_bot, daemon=True)
+    t.start()
