@@ -23,6 +23,7 @@ def requires_auth(f):
 HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY", "")
 
 @app.route("/")
+@requires_auth
 def index():
     return render_template_string(open("index.html").read())
 
