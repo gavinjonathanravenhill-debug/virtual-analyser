@@ -1,30 +1,46 @@
-import os, requests, threading, logging
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import asyncio
+import os, requests, threading, time, logging
+from apscheduler.schedulers.background import BackgroundScheduler
 
 logging.basicConfig(level=logging.WARNING)
 
-BOT_TOKEN   = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_TOKEN_HERE")
+BOT_TOKEN   = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID     = os.environ.get("TELEGRAM_CHAT_ID", "1553006303")
 MORALIS_KEY = os.environ.get("MORALIS_API_KEY", "")
 
 VIRTUAL_ADDRESS = "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b"
 VIRTUAL_CHAIN   = "0x2105"
 
-# Price alert thresholds — {symbol: {above: price, below: price}}
 price_alerts = {}
-# Last known holder snapshot — {address: percentage}
 last_snapshot = {}
+offset = 0
 
-# ── Helpers ───────────────────────────────────────────────
+# ── Telegram API ──────────────────────────────────────────
+
+def tg(method, **kwargs):
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/{method}", json=kwargs, timeout=10)
+        return r.json()
+    except:
+        return {}
+
+def send(msg, chat_id=None):
+    tg("sendMessage", chat_id=chat_id or CHAT_ID, text=msg, parse_mode="HTML")
+
+def get_updates():
+    global offset
+    r = tg("getUpdates", offset=offset, timeout=30, allowed_updates=["message"])
+    updates = r.get("result", [])
+    if updates:
+        offset = updates[-1]["update_id"] + 1
+    return updates
+
+# ── Data ──────────────────────────────────────────────────
 
 def get_prices():
     try:
-        btc  = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
-        virt = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=VIRTUALUSDT", timeout=5).json()
-        return float(btc.get("price", 0)), float(virt.get("price", 0))
+        btc  = float(requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json().get("price", 0))
+        virt = float(requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=VIRTUALUSDT", timeout=5).json().get("price", 0))
+        return btc, virt
     except:
         return 0, 0
 
@@ -32,166 +48,156 @@ def get_holders():
     if not MORALIS_KEY:
         return []
     try:
-        r = requests.get(
-            f"https://deep-index.moralis.io/api/v2.2/erc20/{VIRTUAL_ADDRESS}/owners",
+        meta = requests.get("https://deep-index.moralis.io/api/v2.2/erc20/metadata",
             headers={"X-API-Key": MORALIS_KEY},
-            params={"chain": VIRTUAL_CHAIN, "limit": 20, "order": "DESC"},
-            timeout=15)
-        meta = requests.get(
-            "https://deep-index.moralis.io/api/v2.2/erc20/metadata",
-            headers={"X-API-Key": MORALIS_KEY},
-            params={"chain": VIRTUAL_CHAIN, "addresses[0]": VIRTUAL_ADDRESS},
-            timeout=10).json()
+            params={"chain": VIRTUAL_CHAIN, "addresses[0]": VIRTUAL_ADDRESS}, timeout=10).json()
         decimals = int(meta[0].get("decimals", 18)) if meta else 18
         total_raw = int(meta[0].get("total_supply", 0)) if meta else 0
         total = total_raw / (10 ** decimals) if total_raw else 0
+        r = requests.get(f"https://deep-index.moralis.io/api/v2.2/erc20/{VIRTUAL_ADDRESS}/owners",
+            headers={"X-API-Key": MORALIS_KEY},
+            params={"chain": VIRTUAL_CHAIN, "limit": 20, "order": "DESC"}, timeout=15)
         holders = []
         for h in r.json().get("result", []):
             bal = int(h.get("balance", 0)) / (10 ** decimals)
             pct = round(bal / total * 100, 4) if total else 0
-            holders.append({
-                "address": h.get("owner_address", ""),
-                "name": h.get("owner_address_label") or "",
-                "pct": pct
-            })
+            holders.append({"address": h.get("owner_address", ""), "name": h.get("owner_address_label") or "", "pct": pct})
         return holders
     except:
         return []
 
-def shorten(addr):
-    return addr[:6] + "…" + addr[-4:] if addr else "?"
-
-async def send(bot, msg):
-    await bot.send_message(chat_id=CHAT_ID, text=msg, parse_mode="HTML")
+def sh(a):
+    return a[:6] + "…" + a[-4:] if a else "?"
 
 # ── Commands ──────────────────────────────────────────────
 
-async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🟢 <b>VIRTUAL Analyser Bot</b>\n\n"
-        "/prices — BTC &amp; VIRTUAL live prices\n"
-        "/summary — Top holder snapshot\n"
-        "/analyse &lt;address&gt; — Analyse any token\n"
-        "/setalert BTC 85000 — Price alert above threshold\n"
-        "/alerts — List active alerts\n"
-        "/clearalerts — Remove all alerts",
-        parse_mode="HTML")
+def handle_start(chat_id):
+    send("🟢 <b>VIRTUAL Analyser Bot</b>\n\n"
+         "/prices — BTC &amp; VIRTUAL live prices\n"
+         "/summary — Top holder snapshot\n"
+         "/analyse &lt;address&gt; — Analyse any token\n"
+         "/setalert BTC 85000 — Price alert\n"
+         "/alerts — List active alerts\n"
+         "/clearalerts — Remove all alerts", chat_id)
 
-async def cmd_prices(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+def handle_prices(chat_id):
     btc, virt = get_prices()
-    await update.message.reply_text(
-        f"💰 <b>Live Prices</b>\n\n"
-        f"BTC:     <b>${btc:,.0f}</b>\n"
-        f"VIRTUAL: <b>${virt:.4f}</b>",
-        parse_mode="HTML")
+    send(f"💰 <b>Live Prices</b>\n\nBTC:     <b>${btc:,.0f}</b>\nVIRTUAL: <b>${virt:.4f}</b>", chat_id)
 
-async def cmd_summary(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ Fetching holder data…")
+def handle_summary(chat_id):
+    send("⏳ Fetching holder data…", chat_id)
     holders = get_holders()
     if not holders:
-        await update.message.reply_text("❌ Could not fetch holder data.")
+        send("❌ Could not fetch holder data.", chat_id)
         return
     top10 = holders[:10]
     t10p = sum(h["pct"] for h in top10)
     t3p  = sum(h["pct"] for h in top10[:3])
-    lines = [f"📊 <b>VIRTUAL Top Holders</b>\n"]
+    lines = ["📊 <b>VIRTUAL Top Holders</b>\n"]
     for i, h in enumerate(top10, 1):
-        name = h["name"] or shorten(h["address"])
-        lines.append(f"{i}. {name} — <b>{h['pct']:.2f}%</b>")
-    lines.append(f"\nTop 3:  <b>{t3p:.1f}%</b>")
-    lines.append(f"Top 10: <b>{t10p:.1f}%</b>")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        lines.append(f"{i}. {h['name'] or sh(h['address'])} — <b>{h['pct']:.2f}%</b>")
+    lines.append(f"\nTop 3: <b>{t3p:.1f}%</b> | Top 10: <b>{t10p:.1f}%</b>")
+    send("\n".join(lines), chat_id)
 
-async def cmd_analyse(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if not ctx.args:
-        await update.message.reply_text("Usage: /analyse &lt;contract_address&gt;", parse_mode="HTML")
+def handle_analyse(chat_id, args):
+    if not args:
+        send("Usage: /analyse &lt;contract_address&gt;", chat_id)
         return
-    addr = ctx.args[0].strip()
-    chain = ctx.args[1] if len(ctx.args) > 1 else "0x2105"
-    await update.message.reply_text(f"⏳ Analysing {shorten(addr)}…")
+    addr = args[0]
+    chain = args[1] if len(args) > 1 else "0x2105"
+    send(f"⏳ Analysing {sh(addr)}…", chat_id)
     try:
-        meta = requests.get(
-            "https://deep-index.moralis.io/api/v2.2/erc20/metadata",
+        meta = requests.get("https://deep-index.moralis.io/api/v2.2/erc20/metadata",
             headers={"X-API-Key": MORALIS_KEY},
-            params={"chain": chain, "addresses[0]": addr},
-            timeout=10).json()
+            params={"chain": chain, "addresses[0]": addr}, timeout=10).json()
         decimals = int(meta[0].get("decimals", 18)) if meta else 18
         total_raw = int(meta[0].get("total_supply", 0)) if meta else 0
         total = total_raw / (10 ** decimals) if total_raw else 0
         symbol = meta[0].get("symbol", "?") if meta else "?"
         name   = meta[0].get("name", "?") if meta else "?"
-        r = requests.get(
-            f"https://deep-index.moralis.io/api/v2.2/erc20/{addr}/owners",
+        r = requests.get(f"https://deep-index.moralis.io/api/v2.2/erc20/{addr}/owners",
             headers={"X-API-Key": MORALIS_KEY},
-            params={"chain": chain, "limit": 20, "order": "DESC"},
-            timeout=15)
-        holders = r.json().get("result", [])
+            params={"chain": chain, "limit": 20, "order": "DESC"}, timeout=15)
         top = []
-        for h in holders[:10]:
+        for h in r.json().get("result", [])[:10]:
             bal = int(h.get("balance", 0)) / (10 ** decimals)
             pct = round(bal / total * 100, 4) if total else 0
-            top.append({"name": h.get("owner_address_label") or shorten(h.get("owner_address","")), "pct": pct})
+            top.append({"name": h.get("owner_address_label") or sh(h.get("owner_address","")), "pct": pct})
         t10p = sum(h["pct"] for h in top)
         t3p  = sum(h["pct"] for h in top[:3])
         risk = "🟢 LOW" if t3p < 35 else "🟡 MODERATE" if t3p < 50 else "🔴 HIGH"
-        lines = [f"🔍 <b>{name} ({symbol})</b>\n", f"Risk: {risk}\n"]
+        lines = [f"🔍 <b>{name} ({symbol})</b>\nRisk: {risk}\n"]
         for i, h in enumerate(top, 1):
             lines.append(f"{i}. {h['name']} — <b>{h['pct']:.2f}%</b>")
         lines.append(f"\nTop 3: <b>{t3p:.1f}%</b> | Top 10: <b>{t10p:.1f}%</b>")
-        await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+        send("\n".join(lines), chat_id)
     except Exception as e:
-        await update.message.reply_text(f"❌ Error: {e}")
+        send(f"❌ Error: {e}", chat_id)
 
-async def cmd_setalert(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if len(ctx.args) < 2:
-        await update.message.reply_text("Usage: /setalert BTC 85000\nUse /setalert VIRTUAL 0.80")
+def handle_setalert(chat_id, args):
+    if len(args) < 2:
+        send("Usage: /setalert BTC 85000", chat_id)
         return
-    symbol = ctx.args[0].upper()
+    symbol = args[0].upper()
     try:
-        threshold = float(ctx.args[1])
+        threshold = float(args[1])
+        if symbol not in price_alerts:
+            price_alerts[symbol] = []
+        price_alerts[symbol].append(threshold)
+        send(f"✅ Alert set: {symbol} hits ${threshold:,}", chat_id)
     except:
-        await update.message.reply_text("Invalid price. Example: /setalert BTC 85000")
-        return
-    if symbol not in price_alerts:
-        price_alerts[symbol] = []
-    price_alerts[symbol].append(threshold)
-    await update.message.reply_text(f"✅ Alert set: {symbol} hits ${threshold:,}")
+        send("Invalid price.", chat_id)
 
-async def cmd_alerts(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+def handle_alerts(chat_id):
     if not price_alerts:
-        await update.message.reply_text("No active alerts.")
+        send("No active alerts.", chat_id)
         return
     lines = ["📋 <b>Active Alerts</b>\n"]
     for sym, thresholds in price_alerts.items():
         for t in thresholds:
             lines.append(f"{sym}: ${t:,}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    send("\n".join(lines), chat_id)
 
-async def cmd_clearalerts(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+def handle_clearalerts(chat_id):
     price_alerts.clear()
-    await update.message.reply_text("✅ All alerts cleared.")
+    send("✅ All alerts cleared.", chat_id)
+
+# ── Polling loop ──────────────────────────────────────────
+
+def process_updates():
+    updates = get_updates()
+    for u in updates:
+        msg = u.get("message", {})
+        text = msg.get("text", "")
+        chat_id = msg.get("chat", {}).get("id")
+        if not text or not chat_id:
+            continue
+        parts = text.split()
+        cmd = parts[0].lower().split("@")[0]
+        args = parts[1:]
+        if cmd == "/start":       handle_start(chat_id)
+        elif cmd == "/prices":    handle_prices(chat_id)
+        elif cmd == "/summary":   handle_summary(chat_id)
+        elif cmd == "/analyse":   handle_analyse(chat_id, args)
+        elif cmd == "/setalert":  handle_setalert(chat_id, args)
+        elif cmd == "/alerts":    handle_alerts(chat_id)
+        elif cmd == "/clearalerts": handle_clearalerts(chat_id)
 
 # ── Scheduled jobs ────────────────────────────────────────
 
-async def check_price_alerts(bot):
+def check_price_alerts():
     btc, virt = get_prices()
     prices = {"BTC": btc, "VIRTUAL": virt}
     for symbol, thresholds in list(price_alerts.items()):
         current = prices.get(symbol, 0)
         if current == 0:
             continue
-        triggered = []
-        remaining = []
-        for t in thresholds:
-            if current >= t:
-                triggered.append(t)
-            else:
-                remaining.append(t)
+        triggered = [t for t in thresholds if current >= t]
+        price_alerts[symbol] = [t for t in thresholds if current < t]
         for t in triggered:
-            await send(bot, f"🚨 <b>PRICE ALERT</b>\n{symbol} hit <b>${current:,}</b>\n(threshold: ${t:,})")
-        price_alerts[symbol] = remaining
+            send(f"🚨 <b>PRICE ALERT</b>\n{symbol} hit <b>${current:,}</b>\n(threshold: ${t:,})")
 
-async def check_holder_changes(bot):
+def check_holder_changes():
     global last_snapshot
     holders = get_holders()
     if not holders:
@@ -205,58 +211,14 @@ async def check_holder_changes(bot):
         prev = last_snapshot.get(addr, 0)
         change = pct - prev
         if abs(change) >= 0.5:
-            name = next((h["name"] for h in holders if h["address"] == addr), shorten(addr))
+            name = next((h["name"] for h in holders if h["address"] == addr), sh(addr))
             direction = "📈 INCREASED" if change > 0 else "📉 DECREASED"
-            alerts.append(f"{direction}: {name or shorten(addr)}\n{prev:.2f}% → {pct:.2f}% ({change:+.2f}%)")
-    if alerts:
-        msg = "🔔 <b>VIRTUAL Holder Change</b>\n\n" + "\n\n".join(alerts)
-        await send(bot, msg)
-    last_snapshot = current
-
-async def daily_summary(bot):
-    holders = get_holders()
-    if not holders:
-        return
-    top10 = holders[:10]
-    t10p = sum(h["pct"] for h in top10)
-    t3p  = sum(h["pct"] for h in top10[:3])
-    lines = ["📅 <b>Daily VIRTUAL Summary</b>\n"]
-    for i, h in enumerate(top10, 1):
-        name = h["name"] or shorten(h["address"])
-        lines.append(f"{i}. {name} — <b>{h['pct']:.2f}%</b>")
-    lines.append(f"\nTop 3: <b>{t3p:.1f}%</b> | Top 10: <b>{t10p:.1f}%</b>")
-    btc, virt = get_prices()
-    lines.append(f"\nBTC: <b>${btc:,.0f}</b> | VIRTUAL: <b>${virt:.4f}</b>")
-    await send(bot, "\n".join(lines))
-
-# ── Main ──────────────────────────────────────────────────
-
-def run_bot():
-    async def main():
-        app = Application.builder().token(BOT_TOKEN).build()
-        app.add_handler(CommandHandler("start",       cmd_start))
-        app.add_handler(CommandHandler("prices",      cmd_prices))
-        app.add_handler(CommandHandler("summary",     cmd_summary))
-        app.add_handler(CommandHandler("analyse",     cmd_analyse))
-        app.add_handler(CommandHandler("setalert",    cmd_setalert))
-        app.add_handler(CommandHandler("alerts",      cmd_alerts))
-        app.add_handler(CommandHandler("clearalerts", cmd_clearalerts))
-
-        scheduler = AsyncIOScheduler()
-        scheduler.add_job(check_price_alerts,  "interval", minutes=1,  args=[app.bot])
-        scheduler.add_job(check_holder_changes,"interval", minutes=30, args=[app.bot])
-        scheduler.add_job(daily_summary,       "cron",     hour=8, minute=0, args=[app.bot])
-        scheduler.start()
-
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling()
-        await asyncio.Event().wait()
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
-
-def start_bot_thread():
-    t = threading.Thread(target=run_bot, daemon=True)
-    t.start()
+            alerts.append(f"{direction}: {name or sh(addr)}\n{prev:.2f}% → {pct:.2f
+sed -i '' 's/python-telegram-bot==20.7/python-telegram-bot==13.15/' requirements.txt
+sed -i '' '/python-telegram-bot/d' requirements.txt
+git add .
+git commit -m "rewrite bot with pure requests, no async"
+git push
+git add .
+git commit -m "rewrite bot with pure requests, no async"
+git push
