@@ -472,8 +472,7 @@ window.addEventListener('load', () => {
         if (btn) { btn.classList.add('active'); btn.click(); }
       }
       setTimeout(() => {
-        const analyse = document.getElementById('ab');
-        if (analyse) analyse.click();
+        if (typeof runAnalysis === 'function') runAnalysis();
       }, 1500);
     }
   })();
