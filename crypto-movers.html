@@ -205,7 +205,7 @@
         <th class="r">Price</th>
         <th class="r">1H %</th>
         <th class="r">24H %</th>
-        <th class="r">Mkt Cap</th>
+        <th class="r" style="cursor:pointer" onclick="window._mktSort()">MKT CAP ⇅</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -384,7 +384,7 @@
       const h = c.price_change_percentage_1h_in_currency;
       const d = c.price_change_percentage_24h;
       const bg = i === 0 ? 'background:rgba(0,230,118,0.06)' : (i % 2 === 0 ? 'background:rgba(255,255,255,0.015)' : '');
-      html += '<tr class="row" id="row-' + c.id + '" style="' + bg + '" onclick="window._toggleRow(\'' + c.id + '\')">' +
+      html += '<tr class="row" id="row-' + c.id + '" data-mktcap="' + (c.market_cap||0) + '" style="' + bg + '" onclick="window._toggleRow(\'' + c.id + '\')">' +
         '<td>' + (i + 1) + '</td>' +
         '<td><div class="coin-cell"><img class="coin-img" src="' + c.image + '" alt=""><span class="coin-name">' + c.name + '</span><span class="coin-sym">' + c.symbol.toUpperCase() + '</span></div></td>' +
         '<td class="r mono">' + fmt(c.current_price) + '</td>' +
@@ -398,6 +398,18 @@
     expandedId = null;
   }
 
+  window._mktSortDir = 'desc';
+  window._mktSort = function() {
+    const rows = Array.from(document.querySelectorAll('#tbody tr.row'));
+    rows.sort((a,b) => {
+      const av = parseFloat(a.getAttribute('data-mktcap')||0);
+      const bv = parseFloat(b.getAttribute('data-mktcap')||0);
+      return window._mktSortDir === 'desc' ? bv-av : av-bv;
+    });
+    const tb = document.getElementById('tbody');
+    rows.forEach((r,i) => { tb.appendChild(r); r.cells[0].textContent = i+1; });
+    window._mktSortDir = window._mktSortDir === 'desc' ? 'asc' : 'desc';
+  };
   // Controls
   $('sortBtn').addEventListener('click', () => {
     sortDir = sortDir === 'desc' ? 'asc' : 'desc';
