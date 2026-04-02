@@ -456,5 +456,24 @@ window.addEventListener('load', () => {
   setTimeout(loadV, 500);
 });
 </script>
+
+  // Auto-run from URL params (coming from crypto movers)
+  (function() {
+    const params = new URLSearchParams(window.location.search);
+    const addr = params.get('address');
+    const chain = params.get('chain');
+    if (addr) {
+      const input = document.getElementById('tokenAddress');
+      if (input) input.value = addr;
+      if (chain) {
+        const btn = document.querySelector('[data-chain="' + chain + '"]');
+        if (btn) btn.click();
+      }
+      setTimeout(() => {
+        const analyse = document.getElementById('analyseBtn');
+        if (analyse) analyse.click();
+      }, 500);
+    }
+  })();
 </body>
 </html>

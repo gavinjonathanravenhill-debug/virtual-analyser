@@ -307,6 +307,7 @@
         '<span class="chain-tag">' + c.chain + '</span>' +
         '<span class="ca" title="' + c.address + '">' + truncAddr(c.address) + '</span>' +
         '<button class="copy-btn" data-addr="' + c.address + '" onclick="window._copyCA(this)">Copy</button>' +
+        '<button class="copy-btn" style="background:#00e676;color:#0a0e17;border-color:#00e676" data-addr="' + c.address + '" data-chain="' + c.chain + '" onclick="window._analyseCA(this)">Analyse</button>' +
       '</div>'
     ).join('');
   }
@@ -398,6 +399,14 @@
     expandedId = null;
   }
 
+
+  window._analyseCA = function(btn) {
+    const addr = btn.getAttribute('data-addr');
+    const chain = btn.getAttribute('data-chain');
+    const chainMap = {'ethereum':'eth','base':'base','binance-smart-chain':'bsc'};
+    const c = chainMap[chain] || 'eth';
+    window.location.href = '/?address=' + encodeURIComponent(addr) + '&chain=' + c;
+  };
   window._mktSortDir = 'desc';
   window._mktSort = function() {
     const rows = Array.from(document.querySelectorAll('#tbody tr.row'));
@@ -408,7 +417,15 @@
     });
     const tb = document.getElementById('tbody');
     rows.forEach((r,i) => { tb.appendChild(r); r.cells[0].textContent = i+1; });
-    window._mktSortDir = window._mktSortDir === 'desc' ? 'asc' : 'desc';
+  
+  window._analyseCA = function(btn) {
+    const addr = btn.getAttribute('data-addr');
+    const chain = btn.getAttribute('data-chain');
+    const chainMap = {'ethereum':'eth','base':'base','binance-smart-chain':'bsc'};
+    const c = chainMap[chain] || 'eth';
+    window.location.href = '/?address=' + encodeURIComponent(addr) + '&chain=' + c;
+  };
+  window._mktSortDir = window._mktSortDir === 'desc' ? 'asc' : 'desc';
   };
   // Controls
   $('sortBtn').addEventListener('click', () => {
