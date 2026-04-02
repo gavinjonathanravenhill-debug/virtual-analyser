@@ -462,7 +462,8 @@ window.addEventListener('load', () => {
   (function() {
     const params = new URLSearchParams(window.location.search);
     const address = params.get('address');
-    const chain = params.get('chain');
+    const chainParam = params.get('chain');
+    if (chainParam) { chain = chainParam; document.querySelectorAll('.cb').forEach(b => b.classList.remove('active')); const cb = document.querySelector('[data-chain="' + chainParam + '"]'); if(cb) cb.classList.add('active'); }
     if (address) {
       const input = document.getElementById('addr');
       if (input) input.value = address;
@@ -472,7 +473,10 @@ window.addEventListener('load', () => {
         if (btn) { btn.classList.add('active'); btn.click(); }
       }
       setTimeout(() => {
-        if (typeof runAnalysis === 'function') runAnalysis();
+        if (typeof runAnalysis === 'function') {
+
+          runAnalysis();
+        }
       }, 1500);
     }
   })();
