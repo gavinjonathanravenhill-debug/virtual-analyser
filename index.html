@@ -471,8 +471,11 @@ window.addEventListener('load', () => {
         if (cb) cb.classList.add('active');
       }
       const input = document.getElementById('addr');
-      if (input) input.value = address;
-      setTimeout(() => { runAnalysis(); }, 1500);
+      if (input) {
+        input.value = address;
+        input.dispatchEvent(new Event('input'));
+      }
+      setTimeout(() => { runAnalysis(); }, 2000);
     }
   })();
 </body>
