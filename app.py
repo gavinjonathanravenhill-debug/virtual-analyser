@@ -32,7 +32,7 @@ def index():
 @app.route("/crypto-movers")
 @requires_auth
 def crypto_movers():
-    return open("crypto-movers.html5").read()
+    return open("crypto-movers.html").read()
 
 @app.route("/api/holders")
 def holders():
