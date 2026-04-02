@@ -466,8 +466,9 @@ window.addEventListener('load', () => {
       const input = document.getElementById('addr');
       if (input) input.value = address;
       if (chain) {
+        document.querySelectorAll('.cb').forEach(b => b.classList.remove('active'));
         const btn = document.querySelector('[data-chain="' + chain + '"]');
-        if (btn) btn.click();
+        if (btn) { btn.classList.add('active'); btn.click(); }
       }
       setTimeout(() => {
         const analyse = document.getElementById('ab');

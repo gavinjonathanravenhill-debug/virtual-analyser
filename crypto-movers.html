@@ -403,7 +403,7 @@
   window._analyseCA = function(btn) {
     const addr = btn.getAttribute('data-addr');
     const chain = btn.getAttribute('data-chain');
-    const chainMap = {'ethereum':'eth','base':'base','binance-smart-chain':'bsc'};
+    const chainMap = {'ethereum':'eth','base':'base','binance-smart-chain':'bsc','binance':'bsc','bsc':'bsc','eth':'eth','base-protocol':'base'};
     const c = chainMap[chain] || 'eth';
     window.location.href = '/?address=' + encodeURIComponent(addr) + '&chain=' + c;
   };
@@ -421,7 +421,7 @@
   window._analyseCA = function(btn) {
     const addr = btn.getAttribute('data-addr');
     const chain = btn.getAttribute('data-chain');
-    const chainMap = {'ethereum':'eth','base':'base','binance-smart-chain':'bsc'};
+    const chainMap = {'ethereum':'eth','base':'base','binance-smart-chain':'bsc','binance':'bsc','bsc':'bsc','eth':'eth','base-protocol':'base'};
     const c = chainMap[chain] || 'eth';
     window.location.href = '/?address=' + encodeURIComponent(addr) + '&chain=' + c;
   };
