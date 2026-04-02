@@ -29,6 +29,11 @@ HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY", "")
 def index():
     return render_template_string(open("index.html").read())
 
+@app.route("/crypto-movers")
+@requires_auth
+def crypto_movers():
+    return open("crypto-movers.html").read()
+
 @app.route("/api/holders")
 def holders():
     token = request.args.get("token", "")

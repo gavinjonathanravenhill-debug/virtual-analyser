@@ -225,7 +225,7 @@ def daily_summary():
     t3p  = sum(h["pct"] for h in top10[:3])
     lines = ["📅 <b>Daily VIRTUAL Summary</b>\n"]
     for i, h in enumerate(top10, 1):
-        lines.append(f"{i}. {h["name"] or sh(h["address"])} — <b>{h["pct"]:.2f}%</b>")
+        lines.append(f"{i}. {h['name'] or sh(h['address'])} — <b>{h['pct']:.2f}%</b>")
     lines.append(f"\nTop 3: <b>{t3p:.1f}%</b> | Top 10: <b>{t10p:.1f}%</b>")
     btc, virt = get_prices()
     lines.append(f"\nBTC: <b>${btc:,.0f}</b> | VIRTUAL: <b>${virt:.4f}</b>")
