@@ -462,7 +462,7 @@ window.addEventListener('load', () => {
 
 </script><script>
   // Auto-run from URL params (coming from crypto movers)
-  document.addEventListener('DOMContentLoaded', function() {
+  window.addEventListener('load', function() {
     const params = new URLSearchParams(window.location.search);
     const address = params.get('address');
     const chainParam = params.get('chain');
