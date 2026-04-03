@@ -455,7 +455,8 @@ function renderCL(sc, t3, un, cp) {
 // ── Boot ──────────────────────────────────────────────────
 window.addEventListener('load', () => {
   startPriceFeed();
-  setTimeout(loadV, 500);
+  const _p = new URLSearchParams(window.location.search);
+  if (!_p.get('address')) setTimeout(loadV, 500);
 });
 </script>
 
