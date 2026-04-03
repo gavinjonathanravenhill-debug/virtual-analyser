@@ -200,6 +200,8 @@ document.querySelectorAll('.cb').forEach(b => b.addEventListener('click', () => 
 
 // ── Helpers ───────────────────────────────────────────────
 function loadV() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('address')) return;
   document.getElementById('addr').value = '0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b';
   document.querySelectorAll('.cb').forEach(x => x.classList.remove('active'));
   document.querySelector('[data-chain="base"]').classList.add('active');
