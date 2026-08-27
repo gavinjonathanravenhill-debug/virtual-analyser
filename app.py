@@ -3,9 +3,12 @@ from flask import Flask, jsonify, render_template_string, request, Response
 import functools
 from flask_cors import CORS
 from bot import start_bot_thread
+from mm_check import analyse_market_maker
+from gammaflip_routes import gammaflip_bp
 start_bot_thread()
 
 app = Flask(__name__)
+app.register_blueprint(gammaflip_bp)
 CORS(app)
 
 MORALIS_API_KEY = os.environ.get("MORALIS_API_KEY", "")
@@ -91,14 +94,22 @@ def wallet():
 @app.route("/api/prices")
 def prices():
     try:
-        # BTC price
         btc = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
-        # VIRTUAL price
         virtual = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=VIRTUALUSDT", timeout=5).json()
-        return jsonify({
-            "btc": float(btc.get("price", 0)),
-            "virtual": float(virtual.get("price", 0))
-        })
+        return jsonify({"btc": float(btc.get("price", 0)), "virtual": float(virtual.get("price", 0))})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/mm-check")
+def mm_check():
+    address = request.args.get("address", "").strip()
+    chain_hint = request.args.get("chain", "")
+    if not address:
+        return jsonify({"error": "No address"}), 400
+    try:
+        return jsonify(analyse_market_maker(address, chain_hint))
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": "GeckoTerminal request failed: " + str(e)}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -109,10 +120,8 @@ def candles():
         r = requests.get(
             "https://api.mexc.com/api/v3/klines",
             params={"symbol": symbol, "interval": "1m", "limit": 60},
-            timeout=10
-        )
+            timeout=10)
         data = r.json()
-        # MEXC kline format: [openTime, open, high, low, close, volume, closeTime, ...]
         candles = [{"t": int(k[0]), "c": float(k[4])} for k in data]
         return jsonify({"candles": candles, "symbol": symbol})
     except Exception as e:
