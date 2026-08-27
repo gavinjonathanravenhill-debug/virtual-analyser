@@ -16,6 +16,7 @@ from gammaflip_client import (
     get_term_oi,
     get_exchanges,
     discover_by_strike,
+    discover_openapi_spec,
     GammaFlipError,
 )
 
@@ -58,6 +59,20 @@ def gamma_flip_discover(coin):
     """
     try:
         results = discover_by_strike(coin)
+        return jsonify({"ok": True, "results": results})
+    except GammaFlipError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gammaflip_bp.route("/discover-routes", methods=["GET"])
+def gamma_flip_discover_routes():
+    """
+    Temporary debug route — tries to fetch GammaFlip's OpenAPI spec (or
+    docs page) to get the real, complete route list. Remove once the
+    by-strike endpoint is confirmed and wired in properly.
+    """
+    try:
+        results = discover_openapi_spec()
         return jsonify({"ok": True, "results": results})
     except GammaFlipError as e:
         return jsonify({"ok": False, "error": str(e)}), 502

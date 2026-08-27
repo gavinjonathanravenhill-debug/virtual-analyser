@@ -105,6 +105,45 @@ BY_STRIKE_CANDIDATES = [
 ]
 
 
+def discover_openapi_spec():
+    """
+    Try to fetch a machine-readable API spec (common on FastAPI-based
+    APIs) to get the REAL list of routes instead of guessing paths.
+    Tries a few conventional locations relative to the API root.
+    """
+    import re
+    root = re.sub(r"/api/v1$", "", API_BASE)  # strip to bare domain
+    candidates = [
+        f"{root}/openapi.json",
+        f"{API_BASE}/openapi.json",
+        f"{root}/api/v1/openapi.json",
+        f"{root}/docs",
+        f"{root}/redoc",
+    ]
+    results = []
+    for url in candidates:
+        try:
+            resp = requests.get(url, headers=_headers(), timeout=REQUEST_TIMEOUT)
+            entry = {"url": url, "status": resp.status_code}
+            if resp.ok:
+                ct = resp.headers.get("content-type", "")
+                if "json" in ct:
+                    try:
+                        spec = resp.json()
+                        paths = list(spec.get("paths", {}).keys())
+                        entry["route_count"] = len(paths)
+                        entry["routes"] = paths[:60]  # cap output size
+                    except ValueError:
+                        entry["sample"] = resp.text[:300]
+                else:
+                    entry["content_type"] = ct
+                    entry["sample"] = resp.text[:200]
+            results.append(entry)
+        except requests.exceptions.RequestException as e:
+            results.append({"url": url, "status": None, "error": str(e)})
+    return results
+
+
 def discover_by_strike(coin: str):
     """
     Probe candidate by-strike endpoint paths with the real API key and
@@ -184,25 +223,83 @@ def get_gamma_summary(coin: str):
 
     # Nearest-dated expiry (0DTE / front-week) — where dealer hedging
     # pressure is usually most acute
-    near = expirations[0] if expirations else {}
-    near_total = near.get("total", {})
+    near = expirations[0] if
+cat > gammaflip_routes.py << 'PYEOF'
+"""
+Flask blueprint for GammaFlip endpoints — register this in your app.py.
 
-    regime = "Positive" if agg_total_gex > 0 else "Negative" if agg_total_gex < 0 else None
+    from gammaflip_routes import gammaflip_bp
+    app.register_blueprint(gammaflip_bp)
 
-    summary = {
-        "coin": coin,
-        "raw_fetched_at": time.time(),
-        "spot": spot,
-        "gamma_regime": regime,
-        "total_gex": agg_total_gex,
-        "call_oi_usd": agg_call_oi,
-        "put_oi_usd": agg_put_oi,
-        "upside_gex": agg_upside_gex,
-        "downside_gex": agg_downside_gex,
-        "near_expiry_date": near.get("date"),
-        "near_expiry_total_gex": near_total.get("total_gex"),
-        "near_expiry_call_oi_usd": near_total.get("call_oi_usd"),
-        "near_expiry_put_oi_usd": near_total.get("put_oi_usd"),
-        "expiration_count": metadata.get("expiration_count"),
-    }
-    return summary
+Exposes:
+    GET /api/gamma-flip/<coin>       -> flat summary (regime, GEX, walls, spot)
+    GET /api/gamma-flip/<coin>/raw   -> full raw GammaFlip term-oi payload
+    GET /api/gamma-flip/exchanges    -> exchanges GammaFlip covers
+"""
+
+from flask import Blueprint, jsonify
+from gammaflip_client import (
+    get_gamma_summary,
+    get_term_oi,
+    get_exchanges,
+    discover_by_strike,
+    discover_openapi_spec,
+    GammaFlipError,
+)
+
+gammaflip_bp = Blueprint("gammaflip", __name__, url_prefix="/api/gamma-flip")
+
+
+@gammaflip_bp.route("/<coin>", methods=["GET"])
+def gamma_flip_summary(coin):
+    try:
+        data = get_gamma_summary(coin)
+        return jsonify({"ok": True, "data": data})
+    except GammaFlipError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gammaflip_bp.route("/<coin>/raw", methods=["GET"])
+def gamma_flip_raw(coin):
+    try:
+        data = get_term_oi(coin)
+        return jsonify({"ok": True, "data": data})
+    except GammaFlipError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gammaflip_bp.route("/exchanges", methods=["GET"])
+def gamma_flip_exchanges():
+    try:
+        data = get_exchanges()
+        return jsonify({"ok": True, "data": data})
+    except GammaFlipError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gammaflip_bp.route("/<coin>/discover-by-strike", methods=["GET"])
+def gamma_flip_discover(coin):
+    """
+    Temporary debug route — probes candidate by-strike endpoint paths
+    and reports which one(s) actually respond. Remove once the real
+    endpoint is confirmed and wired into get_gamma_summary properly.
+    """
+    try:
+        results = discover_by_strike(coin)
+        return jsonify({"ok": True, "results": results})
+    except GammaFlipError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gammaflip_bp.route("/discover-routes", methods=["GET"])
+def gamma_flip_discover_routes():
+    """
+    Temporary debug route — tries to fetch GammaFlip's OpenAPI spec (or
+    docs page) to get the real, complete route list. Remove once the
+    by-strike endpoint is confirmed and wired in properly.
+    """
+    try:
+        results = discover_openapi_spec()
+        return jsonify({"ok": True, "results": results})
+    except GammaFlipError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
