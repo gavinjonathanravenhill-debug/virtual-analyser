@@ -143,6 +143,29 @@ input:focus{border-color:var(--accent)}
   </div>
 </div>
 
+<!-- GammaFlip panel -->
+<div class="card" style="margin-bottom:18px">
+  <div class="ct">BTC GAMMA EXPOSURE · GAMMAFLIP</div>
+  <div class="g3" id="gamma-tiles">
+    <div class="stat">
+      <div class="sl">GAMMA REGIME</div>
+      <div class="sv" id="gf-regime">—</div>
+      <div class="ss" id="gf-spot">Spot —</div>
+    </div>
+    <div class="stat">
+      <div class="sl">GEX CALL / PUT</div>
+      <div class="sv" id="gf-gex" style="font-size:18px">—</div>
+      <div class="ss">Positive = calls dominant</div>
+    </div>
+    <div class="stat">
+      <div class="sl">P1 / P2 WALLS</div>
+      <div class="sv" id="gf-walls" style="font-size:18px">—</div>
+      <div class="ss" id="gf-flip">Flip level —</div>
+    </div>
+  </div>
+  <div class="ss" id="gf-updated" style="margin-top:10px">Loading GammaFlip data…</div>
+</div>
+
 <!-- Fetch bar -->
 <div class="fetch-row">
 <input id="addr" value="0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b" placeholder="Token contract address…"/>
@@ -309,8 +332,66 @@ function drawCorrelation() {
 function startPriceFeed() {
   fetchPrices();
   fetchCandles();
+  fetchGammaFlip();
   if (priceState.interval) clearInterval(priceState.interval);
   priceState.interval = setInterval(() => { fetchPrices(); fetchCandles(); }, 30000);
+  // GammaFlip data only refreshes ~every 15 min server-side (and is
+  // cached 15 min in gammaflip_client.py), so poll less aggressively.
+  setInterval(fetchGammaFlip, 5 * 60000);
+}
+
+async function fetchGammaFlip() {
+  const updatedEl = document.getElementById('gf-updated');
+  try {
+    const r = await fetch('/api/gamma-flip/BTC');
+    const j = await r.json();
+    if (!j.ok) {
+      updatedEl.textContent = 'GammaFlip: ' + (j.error || 'unavailable');
+      updatedEl.style.color = 'var(--danger)';
+      return;
+    }
+    const d = j.data;
+    const regime = d.gamma_regime;
+    const regimeEl = document.getElementById('gf-regime');
+    regimeEl.textContent = regime ? String(regime).toUpperCase() : '—';
+    regimeEl.style.color = /pos/i.test(regime || '') ? 'var(--accent)'
+                          : /neg/i.test(regime || '') ? 'var(--danger)'
+                          : 'var(--text)';
+
+    document.getElementById('gf-spot').textContent =
+      d.spot != null ? 'Spot $' + Number(d.spot).toLocaleString('en-US', {maximumFractionDigits:0}) : 'Spot —';
+
+    const call = d.gex_call, put = d.gex_put;
+    document.getElementById('gf-gex').textContent =
+      (call != null && put != null) ? fmtGex(call) + ' / ' + fmtGex(put) : '—';
+
+    const p1 = d.p1_wall, p2 = d.p2_wall;
+    document.getElementById('gf-walls').textContent =
+      (p1 != null || p2 != null)
+        ? (p1 != null ? '$' + Number(p1).toLocaleString('en-US', {maximumFractionDigits:0}) : '—')
+          + ' / ' + (p2 != null ? '$' + Number(p2).toLocaleString('en-US', {maximumFractionDigits:0}) : '—')
+        : '—';
+
+    document.getElementById('gf-flip').textContent =
+      d.gamma_flip_level != null ? 'Flip level $' + Number(d.gamma_flip_level).toLocaleString('en-US', {maximumFractionDigits:0}) : 'Flip level —';
+
+    updatedEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+    updatedEl.style.color = 'var(--muted)';
+  } catch(e) {
+    updatedEl.textContent = 'GammaFlip: fetch failed';
+    updatedEl.style.color = 'var(--danger)';
+    console.log('gammaflip error', e);
+  }
+}
+
+function fmtGex(v) {
+  const n = Number(v);
+  if (!isFinite(n)) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return (n/1e9).toFixed(2) + 'B';
+  if (abs >= 1e6) return (n/1e6).toFixed(2) + 'M';
+  if (abs >= 1e3) return (n/1e3).toFixed(1) + 'K';
+  return n.toFixed(0);
 }
 
 // ── Holder analysis ───────────────────────────────────────
