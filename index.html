@@ -153,14 +153,14 @@ input:focus{border-color:var(--accent)}
       <div class="ss" id="gf-spot">Spot —</div>
     </div>
     <div class="stat">
-      <div class="sl">GEX CALL / PUT</div>
+      <div class="sl">CALL / PUT OI ($)</div>
       <div class="sv" id="gf-gex" style="font-size:18px">—</div>
-      <div class="ss">Positive = calls dominant</div>
+      <div class="ss">Aggregate, all expiries</div>
     </div>
     <div class="stat">
-      <div class="sl">P1 / P2 WALLS</div>
+      <div class="sl">UPSIDE / DOWNSIDE GEX</div>
       <div class="sv" id="gf-walls" style="font-size:18px">—</div>
-      <div class="ss" id="gf-flip">Flip level —</div>
+      <div class="ss" id="gf-flip">Near expiry —</div>
     </div>
   </div>
   <div class="ss" id="gf-updated" style="margin-top:10px">Loading GammaFlip data…</div>
@@ -361,19 +361,16 @@ async function fetchGammaFlip() {
     document.getElementById('gf-spot').textContent =
       d.spot != null ? 'Spot $' + Number(d.spot).toLocaleString('en-US', {maximumFractionDigits:0}) : 'Spot —';
 
-    const call = d.gex_call, put = d.gex_put;
+    const callOi = d.call_oi_usd, putOi = d.put_oi_usd;
     document.getElementById('gf-gex').textContent =
-      (call != null && put != null) ? fmtGex(call) + ' / ' + fmtGex(put) : '—';
+      (callOi != null && putOi != null) ? fmtGex(callOi) + ' / ' + fmtGex(putOi) : '—';
 
-    const p1 = d.p1_wall, p2 = d.p2_wall;
+    const up = d.upside_gex, down = d.downside_gex;
     document.getElementById('gf-walls').textContent =
-      (p1 != null || p2 != null)
-        ? (p1 != null ? '$' + Number(p1).toLocaleString('en-US', {maximumFractionDigits:0}) : '—')
-          + ' / ' + (p2 != null ? '$' + Number(p2).toLocaleString('en-US', {maximumFractionDigits:0}) : '—')
-        : '—';
+      (up != null && down != null) ? fmtGex(up) + ' / ' + fmtGex(down) : '—';
 
     document.getElementById('gf-flip').textContent =
-      d.gamma_flip_level != null ? 'Flip level $' + Number(d.gamma_flip_level).toLocaleString('en-US', {maximumFractionDigits:0}) : 'Flip level —';
+      d.near_expiry_date ? 'Near expiry ' + d.near_expiry_date : 'Near expiry —';
 
     updatedEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
     updatedEl.style.color = 'var(--muted)';

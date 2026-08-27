@@ -96,26 +96,74 @@ def get_gamma_summary(coin: str):
     """
     Convenience wrapper: pulls term-oi and reshapes it into the flat
     summary shape the /api/gamma-flip/<coin> route returns to the frontend.
-    Adjust field extraction below once you've confirmed exact response
-    keys from a live call (log raw payload once and check).
+
+    Real response shape (confirmed from a live call):
+        {
+          "data": {
+            "expirations": [
+              {
+                "date": "28AUG26", "days_to_expiry": 0,
+                "exchanges": {"bybit": {...}, "deribit": {...}, "okx": {...}},
+                "total": {
+                  "abs_gex": ..., "total_gex": ..., "call_oi_usd": ...,
+                  "put_oi_usd": ..., "upside_gex": ..., "downside_gex": ...,
+                  "oi_usd": ..., "contracts": ...
+                },
+                "timestamp": "..."
+              },
+              ...
+            ],
+            "metadata": {
+              "basecoin": "BTC", "current_price": 79445.1,
+              "exchanges_used": [...], "expiration_count": 13,
+              "timestamp": "...", "timestamp_ms": ...
+            }
+          },
+          "meta": {...}
+        }
+
+    There is NO gamma-regime label, wall level, or gamma-flip price in
+    this endpoint — those live in /gex/by-strike, which isn't wired in
+    yet. We derive a regime label from the sign of aggregate total_gex
+    (positive = dealers net long gamma / dampening; negative = dealers
+    net short gamma / amplifying) — this is the standard convention,
+    not a value GammaFlip returns directly.
     """
     raw = get_term_oi(coin)
+    data = raw.get("data", raw)  # handle either wrapped or unwrapped
+    expirations = data.get("expirations", [])
+    metadata = data.get("metadata", {})
 
-    def pick(d, *keys):
-        for k in keys:
-            if isinstance(d, dict) and k in d:
-                return d[k]
-        return None
+    spot = metadata.get("current_price")
+
+    # Aggregate GEX across all expirations (whole term structure)
+    agg_total_gex = sum(e.get("total", {}).get("total_gex", 0) or 0 for e in expirations)
+    agg_call_oi = sum(e.get("total", {}).get("call_oi_usd", 0) or 0 for e in expirations)
+    agg_put_oi = sum(e.get("total", {}).get("put_oi_usd", 0) or 0 for e in expirations)
+    agg_upside_gex = sum(e.get("total", {}).get("upside_gex", 0) or 0 for e in expirations)
+    agg_downside_gex = sum(e.get("total", {}).get("downside_gex", 0) or 0 for e in expirations)
+
+    # Nearest-dated expiry (0DTE / front-week) — where dealer hedging
+    # pressure is usually most acute
+    near = expirations[0] if expirations else {}
+    near_total = near.get("total", {})
+
+    regime = "Positive" if agg_total_gex > 0 else "Negative" if agg_total_gex < 0 else None
 
     summary = {
         "coin": coin,
         "raw_fetched_at": time.time(),
-        "gamma_regime": pick(raw, "gamma_regime", "regime"),
-        "gex_call": pick(raw, "gex_call", "call_gex"),
-        "gex_put": pick(raw, "gex_put", "put_gex"),
-        "gamma_flip_level": pick(raw, "gamma_flip", "flip_level", "gamma_flip_level"),
-        "p1_wall": pick(raw, "p1", "p1_wall"),
-        "p2_wall": pick(raw, "p2", "p2_wall"),
-        "spot": pick(raw, "spot", "underlying_price"),
+        "spot": spot,
+        "gamma_regime": regime,
+        "total_gex": agg_total_gex,
+        "call_oi_usd": agg_call_oi,
+        "put_oi_usd": agg_put_oi,
+        "upside_gex": agg_upside_gex,
+        "downside_gex": agg_downside_gex,
+        "near_expiry_date": near.get("date"),
+        "near_expiry_total_gex": near_total.get("total_gex"),
+        "near_expiry_call_oi_usd": near_total.get("call_oi_usd"),
+        "near_expiry_put_oi_usd": near_total.get("put_oi_usd"),
+        "expiration_count": metadata.get("expiration_count"),
     }
     return summary
