@@ -92,6 +92,45 @@ def get_term_oi(coin: str):
     return _get(f"/gex/term-oi/all/{coin}", cache_key=f"term-oi:{coin}")
 
 
+# Candidate paths for the by-strike GEX endpoint (chart data behind the
+# gammaflip.io "GEX by Strike" view) — schema/path unconfirmed, so we
+# probe several plausible options and report which one actually works.
+BY_STRIKE_CANDIDATES = [
+    "/gex/by-strike/all/{coin}",
+    "/gex/by-strike/{coin}",
+    "/gex/strikes/all/{coin}",
+    "/gex/strikes/{coin}",
+    "/gex/by-strike/all/{coin}/0",
+    "/gex/profile/all/{coin}",
+]
+
+
+def discover_by_strike(coin: str):
+    """
+    Probe candidate by-strike endpoint paths with the real API key and
+    report status codes + a snippet of any successful response, so we
+    can confirm the real path/schema instead of guessing.
+    """
+    coin = coin.upper().strip()
+    results = []
+    for template in BY_STRIKE_CANDIDATES:
+        path = template.format(coin=coin)
+        url = f"{API_BASE}{path}"
+        try:
+            resp = requests.get(url, headers=_headers(), timeout=REQUEST_TIMEOUT)
+            entry = {"path": path, "status": resp.status_code}
+            if resp.ok:
+                try:
+                    body = resp.json()
+                    entry["sample"] = str(body)[:500]
+                except ValueError:
+                    entry["sample"] = resp.text[:300]
+            results.append(entry)
+        except requests.exceptions.RequestException as e:
+            results.append({"path": path, "status": None, "error": str(e)})
+    return results
+
+
 def get_gamma_summary(coin: str):
     """
     Convenience wrapper: pulls term-oi and reshapes it into the flat

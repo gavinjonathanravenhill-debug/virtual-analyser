@@ -15,6 +15,7 @@ from gammaflip_client import (
     get_gamma_summary,
     get_term_oi,
     get_exchanges,
+    discover_by_strike,
     GammaFlipError,
 )
 
@@ -44,5 +45,19 @@ def gamma_flip_exchanges():
     try:
         data = get_exchanges()
         return jsonify({"ok": True, "data": data})
+    except GammaFlipError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+
+@gammaflip_bp.route("/<coin>/discover-by-strike", methods=["GET"])
+def gamma_flip_discover(coin):
+    """
+    Temporary debug route — probes candidate by-strike endpoint paths
+    and reports which one(s) actually respond. Remove once the real
+    endpoint is confirmed and wired into get_gamma_summary properly.
+    """
+    try:
+        results = discover_by_strike(coin)
+        return jsonify({"ok": True, "results": results})
     except GammaFlipError as e:
         return jsonify({"ok": False, "error": str(e)}), 502
