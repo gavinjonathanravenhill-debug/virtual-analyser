@@ -1,14 +1,18 @@
+
+
+
+
 import os, requests
 from flask import Flask, jsonify, render_template_string, request, Response
 import functools
 from flask_cors import CORS
 from bot import start_bot_thread
 from mm_check import analyse_market_maker
-from gammaflip_routes import gammaflip_bp
+# from gammaflip_routes import gammaflip_bp  # TEMP DISABLED
 start_bot_thread()
 
 app = Flask(__name__)
-app.register_blueprint(gammaflip_bp)
+# app.register_blueprint(gammaflip_bp)  # TEMP DISABLED
 CORS(app)
 
 MORALIS_API_KEY = os.environ.get("MORALIS_API_KEY", "")
