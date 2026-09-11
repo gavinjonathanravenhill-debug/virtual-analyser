@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whale Tracker</title>
+    <style>
+        body { font-family: monospace; background: #060810; color: #e8ecff; margin: 0; padding: 20px; }
+        header { text-align: center; margin-bottom: 30px; }
+        h1 { font-size: 2rem; color: #7fff6e; }
+        .whale-section { background: #0d1120; border: 1px solid #1a2040; padding: 20px; margin: 20px 0; border-radius: 8px; }
+        .position-card { background: #1a2040; padding: 15px; margin: 10px 0; border-radius: 4px; }
+        .stat { display: flex; justify-content: space-between; margin: 5px 0; }
+        .label { color: #5a6480; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🐋 WHALE TRACKER</h1>
+        <p>Monitor top wallets for pyramiding patterns</p>
+    </header>
+    <div id="whales"></div>
+    <script>
+        document.getElementById('whales').innerHTML = '<p style="text-align:center">No whales being tracked</p>';
+    </script>
+</body>
+</html>
