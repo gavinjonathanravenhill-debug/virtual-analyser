@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VIRTUAL · Holder Intelligence</title>
+<title>MACRO · Analysis</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#060810;--surface:#0d1120;--border:#1a2040;--accent:#7fff6e;--accent3:#6eb4ff;--warn:#ffb84d;--danger:#ff4d6e;--text:#e8ecff;--muted:#5a6480;--mono:'Space Mono',monospace;--sans:'Syne',sans-serif}
@@ -113,7 +113,7 @@ input:focus{border-color:var(--accent)}
 <body>
 <div class="wrap">
 <header>
-<div><div class="brand-label">Holder Intelligence · Local</div><h1 class="brand-title">VIRTUAL <span>·</span> Analysis</h1></div>
+<div><div class="brand-label">Macro Intelligence · Local</div><h1 class="brand-title">MACRO <span>·</span> Analysis</h1></div>
 <a href="/crypto-movers" style="color:var(--accent);font-family:var(--mono);font-size:11px;border:1px solid rgba(127,255,110,.2);padding:8px 14px;border-radius:4px;text-decoration:none;margin-right:8px;">📊 Movers</a><div class="live-badge"><div class="live-dot"></div>LIVE · LOCAL SERVER</div>
 </header>
 
@@ -143,9 +143,9 @@ input:focus{border-color:var(--accent)}
   </div>
 </div>
 
-<!-- GammaFlip panel -->
-<div class="card" style="margin-bottom:18px">
-  <div class="ct">BTC GAMMA EXPOSURE · GAMMAFLIP</div>
+<!-- GammaFlip panel HIDDEN -->
+<div class="card" style="margin-bottom:18px;display:none">
+  <div class="ct">BTC GAMMA EXPOSURE · GAMMAFLIP</div><style>.card:has(#gamma-tiles){display:none}</style>
   <div class="g3" id="gamma-tiles">
     <div class="stat">
       <div class="sl">GAMMA REGIME</div>
@@ -266,7 +266,7 @@ async function fetchCandles() {
   try {
     const [btcR, oilR] = await Promise.all([
       fetch('/api/candles?symbol=BTCUSDT').then(r => r.json()),
-      fetch('/api/candles?symbol=VIRTUALUSDT').then(r => r.json())
+      fetch('/api/candles?symbol=CL=F').then(r => r.json())
     ]);
     if (btcR.candles && oilR.candles) {
       priceState.btcCandles = btcR.candles;
