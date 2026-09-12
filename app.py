@@ -109,15 +109,14 @@ _oil_cache = {"time": 0, "candles": []}
 def _get_oil_candles():
     import time as _t
     now = _t.time()
-    if _oil_cache["candles"] and (now - _oil_cache["time"]) < 300:
+    if _oil_cache["candles"] and (now - _oil_cache["time"]) < 30:
         return _oil_cache["candles"]
     try:
-        r = requests.get("https://www.alphavantage.co/query", params={"function": "TIME_SERIES_INTRADAY", "symbol": "USO", "interval": "1min", "outputsize": "compact", "apikey": ALPHAVANTAGE_API_KEY}, timeout=12)
-        series = r.json().get("Time Series (1min)", {})
-        from datetime import datetime as _dt
-        candles = [{"t": int(_dt.strptime(k, "%Y-%m-%d %H:%M:%S").timestamp()*1000), "c": float(v["4. close"])} for k, v in series.items()]
-        candles.sort(key=lambda x: x["t"])
-        candles = candles[-60:]
+        r = requests.get("https://contract.mexc.com/api/v1/contract/kline/USOIL_USDT", params={"interval": "Min1", "limit": 60}, timeout=10)
+        d = r.json().get("data", {})
+        times = d.get("time", [])
+        closes = d.get("close", [])
+        candles = [{"t": int(times[i]) * 1000, "c": float(closes[i])} for i in range(len(times))]
         if candles:
             _oil_cache["candles"] = candles
             _oil_cache["time"] = now
