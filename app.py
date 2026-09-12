@@ -99,10 +99,16 @@ def wallet():
 def prices():
     try:
         btc = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
-        virtual = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=VIRTUALUSDT", timeout=5).json()
-        return jsonify({"btc": float(btc.get("price", 0)), "virtual": float(virtual.get("price", 0))})
+        return jsonify({"btc": float(btc.get("price", 0)), "oil": _get_oil_price(), "oil_name": "Brent Crude (USD/bbl)"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+def _get_oil_price():
+    try:
+        r = requests.get("https://api.oilpriceapi.com/v1/demo/prices", timeout=8)
+        return float(r.json().get("data", {}).get("price", 0))
+    except Exception:
+        return 0
 
 @app.route("/api/mm-check")
 def mm_check():
@@ -121,6 +127,12 @@ def mm_check():
 def candles():
     try:
         symbol = request.args.get("symbol", "BTCUSDT")
+        if symbol.upper() in ("CL=F", "OIL", "BRENT"):
+            import time as _t
+            spot = _get_oil_price()
+            now = int(_t.time() * 1000)
+            candles = [{"t": now - (59 - i) * 60000, "c": spot} for i in range(60)]
+            return jsonify({"candles": candles, "symbol": "OIL"})
         r = requests.get(
             "https://api.mexc.com/api/v3/klines",
             params={"symbol": symbol, "interval": "1m", "limit": 60},
