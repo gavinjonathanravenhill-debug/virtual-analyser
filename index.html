@@ -143,10 +143,13 @@ input:focus{border-color:var(--accent)}
   </div>
 </div>
 
-<!-- GammaFlip panel HIDDEN -->
-<div class="card" style="margin-bottom:18px;display:none">
-  <div class="ct">BTC GAMMA EXPOSURE · GAMMAFLIP</div><style>.card:has(#gamma-tiles){display:none}</style>
-  <div class="g3" id="gamma-tiles">
+<!-- GammaFlip panel with chart -->
+<div class="card" style="margin-bottom:18px">
+  <div class="ct">BTC GAMMA EXPOSURE · GAMMAFLIP</div>
+  <div style="position:relative;margin-bottom:12px">
+    <canvas id="gamma-canvas" style="width:100%;height:280px;display:block;border-radius:4px;background:rgba(255,255,255,.02);border:1px solid var(--border)"></canvas>
+  </div>
+  <div class="g3" id="gamma-tiles" style="display:none">
     <div class="stat">
       <div class="sl">GAMMA REGIME</div>
       <div class="sv" id="gf-regime">—</div>
@@ -163,8 +166,9 @@ input:focus{border-color:var(--accent)}
       <div class="ss" id="gf-flip">Near expiry —</div>
     </div>
   </div>
-  <div class="ss" id="gf-updated" style="margin-top:10px">Loading GammaFlip data…</div>
+  <div class="ss" id="gf-updated" style="margin-top:10px;font-size:10px">Loading GammaFlip data…</div>
 </div>
+
 
 <!-- Fetch bar -->
 <div class="fetch-row" style="display:none">
@@ -343,41 +347,56 @@ function startPriceFeed() {
 async function fetchGammaFlip() {
   const updatedEl = document.getElementById('gf-updated');
   try {
-    const r = await fetch('/api/gamma-flip/BTC');
+    // Try to fetch surface data for chart
+    const r = await fetch('/api/gamma-flip/BTC/surface');
     const j = await r.json();
     if (!j.ok) {
       updatedEl.textContent = 'GammaFlip: ' + (j.error || 'unavailable');
       updatedEl.style.color = 'var(--danger)';
       return;
     }
+    
     const d = j.data;
-    const regime = d.gamma_regime;
-    const regimeEl = document.getElementById('gf-regime');
-    regimeEl.textContent = regime ? String(regime).toUpperCase() : '—';
-    regimeEl.style.color = /pos/i.test(regime || '') ? 'var(--accent)'
-                          : /neg/i.test(regime || '') ? 'var(--danger)'
-                          : 'var(--text)';
-
-    document.getElementById('gf-spot').textContent =
-      d.spot != null ? 'Spot $' + Number(d.spot).toLocaleString('en-US', {maximumFractionDigits:0}) : 'Spot —';
-
-    const callOi = d.call_oi_usd, putOi = d.put_oi_usd;
-    document.getElementById('gf-gex').textContent =
-      (callOi != null && putOi != null) ? fmtGex(callOi) + ' / ' + fmtGex(putOi) : '—';
-
-    const up = d.upside_gex, down = d.downside_gex;
-    document.getElementById('gf-walls').textContent =
-      (up != null && down != null) ? fmtGex(up) + ' / ' + fmtGex(down) : '—';
-
-    document.getElementById('gf-flip').textContent =
-      d.near_expiry_date ? 'Near expiry ' + d.near_expiry_date : 'Near expiry —';
-
+    const strikes = d.strikes || [];
+    const spot = d.spot || 0;
+    
+    if (strikes.length > 0 && spot > 0) {
+      drawGammaChart(strikes, spot, d.regime_labels || {}, d.vol_triggers || {});
+    }
+    
     updatedEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
     updatedEl.style.color = 'var(--muted)';
   } catch(e) {
-    updatedEl.textContent = 'GammaFlip: fetch failed';
-    updatedEl.style.color = 'var(--danger)';
-    console.log('gammaflip error', e);
+    updatedEl.textContent = 'GammaFlip: chart unavailable';
+    updatedEl.style.color = 'var(--warn)';
+  }
+  
+  // Also fetch and display summary stats
+  try {
+    const r = await fetch('/api/gamma-flip/BTC');
+    const j = await r.json();
+    if (j.ok) {
+      const d = j.data;
+      const regime = d.gamma_regime;
+      const regimeEl = document.getElementById('gf-regime');
+      regimeEl.textContent = regime ? String(regime).toUpperCase() : '—';
+      regimeEl.style.color = /bullish/i.test(regime || '') ? 'var(--accent)'
+                            : /bearish/i.test(regime || '') ? 'var(--danger)'
+                            : 'var(--text)';
+
+      document.getElementById('gf-spot').textContent =
+        d.spot_price != null ? 'Spot $' + Number(d.spot_price).toLocaleString('en-US', {maximumFractionDigits:0}) : 'Spot —';
+
+      const callOi = d.call_oi, putOi = d.put_oi;
+      document.getElementById('gf-gex').textContent =
+        (callOi != null && putOi != null) ? fmtGex(callOi) + ' / ' + fmtGex(putOi) : '—';
+
+      const up = d.upside_gex, down = d.downside_gex;
+      document.getElementById('gf-walls').textContent =
+        (up != null && down != null) ? fmtGex(up) + ' / ' + fmtGex(down) : '—';
+    }
+  } catch(e) {
+    // Silent fail on summary
   }
 }
 
@@ -536,6 +555,102 @@ window.addEventListener('load', () => {
   const _p = new URLSearchParams(window.location.search);
   // auto-load disabled
 });
+
+function drawGammaChart(strikes, spot, regimeLabels, volTriggers) {
+  const canvas = document.getElementById('gamma-canvas');
+  if (!canvas || !canvas.getContext) return;
+  
+  const ctx = canvas.getContext('2d');
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * window.devicePixelRatio || rect.width;
+  canvas.height = rect.height * window.devicePixelRatio || rect.height;
+  
+  const W = canvas.width, H = canvas.height;
+  const P = {top:20, bottom:40, left:40, right:60};
+  const chartW = W - P.left - P.right;
+  const chartH = H - P.top - P.bottom;
+  
+  // Scale
+  const minStrike = Math.min(...strikes.map(s => s.strike));
+  const maxStrike = Math.max(...strikes.map(s => s.strike));
+  const strikeRange = maxStrike - minStrike;
+  const maxNetGex = Math.max(...strikes.map(s => s.net_gex || 0), 1);
+  const maxAbsGex = Math.max(...strikes.map(s => s.abs_gex || 0), 1);
+  
+  // Background
+  ctx.fillStyle = 'rgba(255,255,255,.02)';
+  ctx.fillRect(P.left, P.top, chartW, chartH);
+  
+  // Draw grid
+  ctx.strokeStyle = 'rgba(127,255,110,.08)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 5; i++) {
+    const y = P.top + (chartH / 5) * i;
+    ctx.beginPath(); ctx.moveTo(P.left, y); ctx.lineTo(W - P.right, y);
+    ctx.stroke();
+  }
+  
+  // Draw bars (net GEX per 1% move) - green if positive, red if negative
+  strikes.forEach(s => {
+    const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
+    const barH = (s.net_gex / maxNetGex) * (chartH * 0.6);
+    const barY = P.top + chartH * 0.6 - barH;
+    
+    ctx.fillStyle = s.net_gex >= 0 ? 'rgba(127,255,110,0.4)' : 'rgba(255,77,110,0.4)';
+    ctx.fillRect(x - 1.5, barY, 3, barH);
+  });
+  
+  // Draw line (absolute GEX)
+  ctx.strokeStyle = 'rgba(110,180,255,0.7)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  let first = true;
+  strikes.forEach(s => {
+    const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
+    const lineY = P.top + chartH * 0.6 - ((s.abs_gex / maxAbsGex) * (chartH * 0.8));
+    first ? ctx.moveTo(x, lineY) : ctx.lineTo(x, lineY);
+    first = false;
+  });
+  ctx.stroke();
+  
+  // Mark current spot price
+  const spotX = P.left + ((spot - minStrike) / strikeRange) * chartW;
+  ctx.strokeStyle = '#ffb84d';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(spotX, P.top); ctx.lineTo(spotX, P.top + chartH);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  
+  // Draw regime labels (P1, P2, A1, A2)
+  ctx.fillStyle = 'rgba(127,255,110,0.8)';
+  ctx.font = 'bold 10px "Space Mono"';
+  ctx.textAlign = 'center';
+  Object.entries(regimeLabels).forEach(([strike, label]) => {
+    const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
+    const peak = strikes.find(s => s.strike === parseFloat(strike));
+    const peakY = peak ? P.top + chartH * 0.6 - ((peak.net_gex / maxNetGex) * (chartH * 0.6)) : P.top + chartH * 0.3;
+    
+    ctx.fillStyle = label.includes('P') ? 'rgba(127,255,110,0.9)' : 'rgba(110,180,255,0.9)';
+    ctx.fillRect(sx - 18, peakY - 14, 36, 16);
+    ctx.fillStyle = '#060810';
+    ctx.fillText(label, sx, peakY - 5);
+  });
+  
+  // Axis labels
+  ctx.fillStyle = 'var(--muted)';
+  ctx.font = '9px "Space Mono"';
+  ctx.textAlign = 'center';
+  ctx.fillText(Math.round(minStrike).toString(), P.left, H - 8);
+  ctx.fillText(Math.round(maxStrike).toString(), W - P.right, H - 8);
+  
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(127,255,110,0.5)';
+  ctx.fillText('Net GEX/1%', W - P.right + 20, P.top + 12);
+  ctx.fillStyle = 'rgba(110,180,255,0.5)';
+  ctx.fillText('Abs GEX', W - P.right + 20, P.top + 26);
+}
+
 </script>
 
 </script><script>
