@@ -1,23 +1,12 @@
 """
-Flask blueprint for GammaFlip endpoints — register this in your app.py.
-
-    from gammaflip_routes import gammaflip_bp
-    app.register_blueprint(gammaflip_bp)
-
-Exposes:
-    GET /api/gamma-flip/<coin>           -> flat summary (regime, GEX, walls, spot)
-    GET /api/gamma-flip/<coin>/surface   -> gamma by strike for charting
-    GET /api/gamma-flip/<coin>/raw       -> full raw GammaFlip term-oi payload
-    GET /api/gamma-flip/exchanges        -> exchanges GammaFlip covers
+Flask blueprint for GammaFlip endpoints
 """
 
 from flask import Blueprint, jsonify, request
 from gammaflip_client import (
     get_gamma_summary,
-    get_gamma_surface,
     parse_gamma_surface,
     get_term_oi,
-    get_exchanges,
     GammaFlipError,
 )
 
@@ -35,10 +24,9 @@ def gamma_flip_summary(coin):
 
 @gammaflip_bp.route("/<coin>/surface", methods=["GET"])
 def gamma_flip_surface(coin):
-    """Return gamma by strike formatted for charting."""
+    """Return gamma by expiration (proxy for surface chart)."""
     try:
-        exchange = request.args.get("exchange", "Deribit")
-        raw = get_gamma_surface(coin, exchange=exchange)
+        raw = get_term_oi(coin)
         parsed = parse_gamma_surface(raw)
         return jsonify({"ok": True, "data": parsed})
     except GammaFlipError as e:
@@ -49,15 +37,6 @@ def gamma_flip_surface(coin):
 def gamma_flip_raw(coin):
     try:
         data = get_term_oi(coin)
-        return jsonify({"ok": True, "data": data})
-    except GammaFlipError as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
-
-
-@gammaflip_bp.route("/exchanges", methods=["GET"])
-def gamma_flip_exchanges():
-    try:
-        data = get_exchanges()
         return jsonify({"ok": True, "data": data})
     except GammaFlipError as e:
         return jsonify({"ok": False, "error": str(e)}), 502
