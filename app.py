@@ -95,7 +95,7 @@ def wallet():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-TWELVEDATA_API_KEY = os.environ.get("TWELVEDATA_API_KEY", "9f39b5b7ef0b4caaab4dba6e47edddf5")
+ALPHAVANTAGE_API_KEY = os.environ.get("ALPHAVANTAGE_API_KEY", "RV30880XPRJM0RHA")
 
 @app.route("/api/prices")
 def prices():
@@ -105,22 +105,25 @@ def prices():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+_oil_cache = {"time": 0, "candles": []}
 def _get_oil_candles():
+    import time as _t
+    now = _t.time()
+    if _oil_cache["candles"] and (now - _oil_cache["time"]) < 300:
+        return _oil_cache["candles"]
     try:
-        r = requests.get(
-            "https://api.twelvedata.com/time_series",
-            params={"symbol": "WTI/USD", "interval": "1min", "outputsize": 60, "apikey": TWELVEDATA_API_KEY},
-            timeout=10)
-        data = r.json()
-        values = data.get("values", [])
-        candles = []
-        for v in reversed(values):
-            from datetime import datetime as _dt
-            ts = int(_dt.strptime(v["datetime"], "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
-            candles.append({"t": ts, "c": float(v["close"])})
+        r = requests.get("https://www.alphavantage.co/query", params={"function": "TIME_SERIES_INTRADAY", "symbol": "USO", "interval": "1min", "outputsize": "compact", "apikey": ALPHAVANTAGE_API_KEY}, timeout=12)
+        series = r.json().get("Time Series (1min)", {})
+        from datetime import datetime as _dt
+        candles = [{"t": int(_dt.strptime(k, "%Y-%m-%d %H:%M:%S").timestamp()*1000), "c": float(v["4. close"])} for k, v in series.items()]
+        candles.sort(key=lambda x: x["t"])
+        candles = candles[-60:]
+        if candles:
+            _oil_cache["candles"] = candles
+            _oil_cache["time"] = now
         return candles
     except Exception:
-        return []
+        return _oil_cache["candles"]
 
 def _get_oil_price():
     candles = _get_oil_candles()

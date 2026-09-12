@@ -125,7 +125,7 @@ input:focus{border-color:var(--accent)}
     <div class="psub" id="price-updated">Loading…</div>
   </div>
   <div>
-    <div class="plabel">OIL PRICE (Brent)</div>
+    <div class="plabel">OIL PRICE (USO)</div>
     <div class="pval" id="virt-price" style="color:var(--accent)">—</div>
     <div class="psub">CORRELATION: <span id="corr-val" style="font-weight:700">—</span> <span id="corr-label" style="font-size:9px">—</span></div>
   </div>
@@ -257,7 +257,7 @@ async function fetchPrices() {
     const d = await r.json();
     if (d.error) return;
     document.getElementById('btc-price').textContent = '$' + d.btc.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
-    document.getElementById('virt-price').textContent = '$' + d.oil.toFixed(4);
+    document.getElementById('virt-price').textContent = '$' + d.oil.toFixed(2);
     document.getElementById('price-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch(e) { console.log('price error', e); }
 }
