@@ -731,6 +731,76 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers) {
   ctx.fillText('Net GEX/1%', W - P.right + 20, P.top + 12);
   ctx.fillStyle = 'rgba(110,180,255,0.5)';
   ctx.fillText('Abs GEX', W - P.right + 20, P.top + 26);
+
+  // ---- price gridlines every $100 (price axis only) ----
+  if (axisMode !== 'days_to_expiry') {
+    const step = 100;
+    const firstTick = Math.ceil(minStrike / step) * step;
+    const tickCount = Math.floor((maxStrike - firstTick) / step);
+    // Label every Nth tick so text never collides
+    const labelEvery = Math.max(1, Math.ceil((tickCount + 1) / 8));
+    let t = 0;
+    for (let price = firstTick; price <= maxStrike; price += step, t++) {
+      const x = P.left + ((price - minStrike) / strikeRange) * chartW;
+      const isLabel = (t % labelEvery === 0);
+      ctx.strokeStyle = isLabel ? 'rgba(255,255,255,0.22)'
+                                : 'rgba(255,255,255,0.07)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, P.top);
+      ctx.lineTo(x, P.top + chartH);
+      ctx.stroke();
+      if (isLabel) {
+        ctx.font = 'bold 20px "Space Mono"';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.fillText('$' + price.toLocaleString('en-US'), x, H - 14);
+      }
+    }
+  }
+
+  // ---- current price marker ----
+  {
+    const sx = P.left + ((spot - minStrike) / strikeRange) * chartW;
+    ctx.fillStyle = 'rgba(255,190,60,0.9)';
+    ctx.fillRect(sx - 2, P.top, 4, chartH);           // solid bar
+    const txt = '$' + Math.round(spot).toLocaleString('en-US');
+    ctx.font = 'bold 20px "Space Mono"';
+    const w = ctx.measureText(txt).width + 16;
+    ctx.fillStyle = 'rgba(255,190,60,0.95)';
+    ctx.fillRect(sx - w / 2, P.top - 28, w, 24);       // label chip
+    ctx.fillStyle = '#0a0f1e';
+    ctx.textAlign = 'center';
+    ctx.fillText(txt, sx, P.top - 10);
+  }
+
+  // ---- legend ----
+  {
+    const lx = W - P.right - 230, ly = P.top + 12;
+    ctx.fillStyle = 'rgba(8,12,24,0.88)';
+    ctx.fillRect(lx, ly, 222, 92);
+    ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(lx, ly, 222, 92);
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 16px "Space Mono"';
+
+    ctx.fillStyle = 'rgba(0,255,100,1)';
+    ctx.fillRect(lx + 12, ly + 14, 18, 14);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Positive gamma', lx + 40, ly + 26);
+
+    ctx.fillStyle = 'rgba(255,0,80,1)';
+    ctx.fillRect(lx + 12, ly + 40, 18, 14);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Negative gamma', lx + 40, ly + 52);
+
+    ctx.fillStyle = 'rgba(255,190,60,0.95)';
+    ctx.fillRect(lx + 12, ly + 66, 18, 14);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Spot price', lx + 40, ly + 78);
+  }
+
 }
 
 </script>
