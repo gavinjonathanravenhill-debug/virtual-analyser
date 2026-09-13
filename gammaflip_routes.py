@@ -5,10 +5,7 @@ Flask blueprint for GammaFlip endpoints
 import requests
 from flask import Blueprint, jsonify
 from gammaflip_client import (
-    get_gamma_summary,
-    get_gamma_surface,
-    get_term_oi,
-    GammaFlipError,
+    get_gamma_summary, get_gamma_surface, get_term_oi, GammaFlipError,
 )
 
 gammaflip_bp = Blueprint("gammaflip", __name__, url_prefix="/api/gamma-flip")
@@ -27,52 +24,63 @@ def gamma_flip_surface(coin):
     try:
         return jsonify({"ok": True, "data": get_gamma_surface(coin)})
     except GammaFlipError as e:
-        return jsonify({"ok": False, "error": str(e), "source": "by-strike"}), 502
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 
-@gammaflip_bp.route("/<coin>/discover3", methods=["GET"])
-def gamma_flip_discover3(coin):
-    """Capture 404 BODIES (they may name valid routes) and try real exchanges."""
+@gammaflip_bp.route("/<coin>/sweep", methods=["GET"])
+def gamma_flip_sweep(coin):
+    """Systematic sweep: word x prefix x expiry-segment.
+
+    Real endpoints answer with a JSON envelope containing meta.rate_limit;
+    missing routes return Flask's HTML 404. So we detect success by
+    content, not just status code.
+    """
     import gammaflip_client as gf
     coin = coin.upper()
-    out = {"coin": coin}
 
-    def probe(path):
-        try:
-            r = requests.get(f"{gf.API_BASE}{path}", headers=gf._headers(), timeout=8)
-            return {"path": path, "code": r.status_code, "body": r.text[:600]}
-        except Exception as e:
-            return {"path": path, "error": str(e)[:200]}
+    words = [
+        "by-strike", "strike-oi", "oi-strike", "strikes", "strike",
+        "profile", "surface", "levels", "chain", "snapshot",
+        "gamma-profile", "gex-profile", "strike-profile",
+        "distribution", "walls", "heatmap", "spot-gex", "net-gex",
+    ]
 
-    # What does a 404 body actually say? Use a nonsense path as control.
-    out["error_body_sample"] = probe("/definitely-not-a-real-endpoint")
+    # nearest expiry, for the variants that need one
+    try:
+        ed = gf._get(f"/expirations/all/{coin}")
+        exp = (ed.get("data", {}) or {}).get("expirations", [None])[0]
+    except Exception:
+        exp = None
 
-    # What exchanges exist?
-    out["exchanges"] = probe("/exchanges")
-
-    # Try the term-oi shape with each known exchange name, swapping the
-    # resource word. If by-strike is exchange-specific, "all" would 404
-    # while "deribit" succeeds.
     paths = []
-    for ex in ["deribit", "bybit", "okx", "all"]:
-        for word in ["by-strike", "strike", "strikes", "strike-oi", "oi"]:
-            paths.append(f"/gex/{word}/{ex}/{coin}")
+    for w in words:
+        paths.append(f"/gex/{w}/all/{coin}")
+        paths.append(f"/{w}/all/{coin}")
+        if exp:
+            paths.append(f"/gex/{w}/all/{coin}/{exp}")
 
-    # Also: maybe it mirrors term-oi exactly but with a different suffix
-    for word in ["strike-gex", "gex-strike", "oi-strike", "strike-oi", "spot-oi"]:
-        paths.append(f"/gex/{word}/all/{coin}")
-
-    results = []
+    hits, misses = [], 0
     for p in paths:
-        r = probe(p)
-        if r.get("code") == 200:
-            out["RESOLVED"] = p
-            out["winner"] = r
-            out["results"] = results
-            return jsonify(out)
-        results.append({"path": p, "code": r.get("code")})
-    out["results"] = results
-    return jsonify(out)
+        try:
+            r = requests.get(f"{gf.API_BASE}{p}", headers=gf._headers(), timeout=8)
+            # A real route returns JSON; a missing one returns HTML.
+            ctype = r.headers.get("content-type", "")
+            if r.status_code == 200 and "json" in ctype:
+                hits.append({"path": p, "code": 200, "body": r.text[:1500]})
+            elif r.status_code != 404:
+                # 401/403/422 all mean the route EXISTS
+                hits.append({"path": p, "code": r.status_code,
+                             "body": r.text[:500]})
+            else:
+                misses += 1
+        except Exception as e:
+            hits.append({"path": p, "error": str(e)[:150]})
+
+    return jsonify({
+        "coin": coin, "expiry_used": exp,
+        "paths_tried": len(paths), "dead_404s": misses,
+        "HITS": hits or "none - none of these words are routes",
+    })
 
 
 @gammaflip_bp.route("/<coin>/raw", methods=["GET"])
