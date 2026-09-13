@@ -361,7 +361,7 @@ async function fetchGammaFlip() {
     const spot = d.spot || 0;
     
     if (strikes.length > 0 && spot > 0) {
-      drawGammaChart(strikes, spot, d.regime_labels || {}, d.vol_triggers || {});
+      drawGammaChart(strikes, spot, d.regime_labels || {}, d.vol_triggers || {}, d.axis);
     }
     
     updatedEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -556,7 +556,7 @@ window.addEventListener('load', () => {
   // auto-load disabled
 });
 
-function drawGammaChart(strikes, spot, regimeLabels, volTriggers) {
+function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   const canvas = document.getElementById('gamma-canvas');
   if (!canvas || !canvas.getContext) return;
   
