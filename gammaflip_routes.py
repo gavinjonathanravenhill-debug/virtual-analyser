@@ -25,7 +25,6 @@ def gamma_flip_summary(coin):
 
 @gammaflip_bp.route("/<coin>/surface", methods=["GET"])
 def gamma_flip_surface(coin):
-    """Real per-strike GEX surface."""
     try:
         parsed = get_gamma_surface(coin)
         return jsonify({"ok": True, "data": parsed})
@@ -33,58 +32,80 @@ def gamma_flip_surface(coin):
         return jsonify({"ok": False, "error": str(e), "source": "by-strike"}), 502
 
 
-@gammaflip_bp.route("/<coin>/discover", methods=["GET"])
-def gamma_flip_discover(coin):
-    """Ask the API to describe itself, then probe by-strike variants.
+@gammaflip_bp.route("/<coin>/expiries", methods=["GET"])
+def gamma_flip_expiries(coin):
+    """List available expirations - the working endpoint we found."""
+    import gammaflip_client as gf
+    try:
+        return jsonify({"ok": True,
+                        "data": gf._get(f"/expirations/all/{coin.upper()}")})
+    except GammaFlipError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
 
-    Checks self-documenting routes first (root, openapi, docs) since those
-    give us the real path list instead of us guessing at it.
+
+@gammaflip_bp.route("/<coin>/discover2", methods=["GET"])
+def gamma_flip_discover2(coin):
+    """Probe by-strike using a REAL expiry code.
+
+    /expirations/all/{coin} works and returns codes like 14SEP26. GEX by
+    strike is computed per expiration, so the endpoint most likely wants
+    one of those as a path segment or query param.
     """
     import gammaflip_client as gf
     coin = coin.upper()
-    out = {"coin": coin, "self_describing": [], "probes": []}
+    out = {"coin": coin}
 
-    # 1. Routes that might list the API surface for us
-    for path in ["", "/", "/openapi.json", "/docs", "/endpoints", "/routes"]:
-        url = f"{gf.API_BASE}{path}"
-        try:
-            r = requests.get(url, headers=gf._headers(), timeout=8)
-            entry = {"url": url, "code": r.status_code}
-            if r.ok:
-                entry["body"] = r.text[:1200]
-            out["self_describing"].append(entry)
-        except Exception as e:
-            out["self_describing"].append({"url": url, "error": str(e)[:200]})
+    # Pull a live expiry to test with
+    try:
+        exp_data = gf._get(f"/expirations/all/{coin}")
+        expiries = (exp_data.get("data", {}) or {}).get("expirations", [])
+    except GammaFlipError as e:
+        return jsonify({"error": f"could not list expiries: {e}"}), 502
 
-    # 2. Wider set of by-strike shapes, including expiry segment and
-    #    query-param styles (the UI shows "BTC / All / TOTAL").
-    candidates = [
-        f"/gex/by-strike/all/{coin}/TOTAL",
-        f"/gex/by-strike/all/{coin}?expiry=TOTAL",
-        f"/gex/by-strike/all/{coin}?expiration=all",
-        f"/gex/strike-gex/all/{coin}",
-        f"/gex/gex-by-strike/all/{coin}",
-        f"/gex/by_strike/all/{coin}",
-        f"/gex/strikes/{coin}",
-        f"/strike/all/{coin}",
-        f"/by-strike/all/{coin}",
-        f"/gex/all/{coin}",
-        f"/gex/{coin}",
-        f"/expirations/all/{coin}",
-        f"/gex/expirations/all/{coin}",
-        f"/coins",
+    if not expiries:
+        return jsonify({"error": "no expiries returned"}), 502
+
+    exp = expiries[0]          # nearest, e.g. 14SEP26
+    out["using_expiry"] = exp
+    out["all_expiries"] = expiries
+
+    templates = [
+        "/gex/by-strike/all/{c}/{e}",
+        "/by-strike/all/{c}/{e}",
+        "/strikes/all/{c}/{e}",
+        "/gex/strikes/all/{c}/{e}",
+        "/gex/by-strike/all/{c}?expiry={e}",
+        "/gex/by-strike/all/{c}?expiration={e}",
+        "/by-strike/all/{c}?expiry={e}",
+        "/strikes/all/{c}?expiry={e}",
+        "/gex/all/{c}/{e}",
+        "/gex/oi/all/{c}/{e}",
+        "/gex/strike-oi/all/{c}/{e}",
+        # aggregate-across-expiries variants
+        "/gex/by-strike/all/{c}/ALL",
+        "/by-strike/all/{c}/ALL",
+        "/strikes/all/{c}",
+        "/by-strike/all/{c}",
     ]
-    for path in candidates:
+
+    results = []
+    for t in templates:
+        path = t.format(c=coin, e=exp)
         url = f"{gf.API_BASE}{path}"
         try:
             r = requests.get(url, headers=gf._headers(), timeout=8)
             entry = {"path": path, "code": r.status_code}
             if r.ok:
-                entry["body"] = r.text[:800]
-            out["probes"].append(entry)
+                entry["body"] = r.text[:1500]
+                results.append(entry)
+                out["RESOLVED"] = path
+                out["results"] = results
+                return jsonify(out)      # stop on first success
+            results.append(entry)
         except Exception as e:
-            out["probes"].append({"path": path, "error": str(e)[:200]})
+            results.append({"path": path, "error": str(e)[:200]})
 
+    out["results"] = results
     return jsonify(out)
 
 
