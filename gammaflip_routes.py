@@ -17,8 +17,7 @@ gammaflip_bp = Blueprint("gammaflip", __name__, url_prefix="/api/gamma-flip")
 @gammaflip_bp.route("/<coin>", methods=["GET"])
 def gamma_flip_summary(coin):
     try:
-        data = get_gamma_summary(coin)
-        return jsonify({"ok": True, "data": data})
+        return jsonify({"ok": True, "data": get_gamma_summary(coin)})
     except GammaFlipError as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
@@ -26,85 +25,52 @@ def gamma_flip_summary(coin):
 @gammaflip_bp.route("/<coin>/surface", methods=["GET"])
 def gamma_flip_surface(coin):
     try:
-        parsed = get_gamma_surface(coin)
-        return jsonify({"ok": True, "data": parsed})
+        return jsonify({"ok": True, "data": get_gamma_surface(coin)})
     except GammaFlipError as e:
         return jsonify({"ok": False, "error": str(e), "source": "by-strike"}), 502
 
 
-@gammaflip_bp.route("/<coin>/expiries", methods=["GET"])
-def gamma_flip_expiries(coin):
-    """List available expirations - the working endpoint we found."""
-    import gammaflip_client as gf
-    try:
-        return jsonify({"ok": True,
-                        "data": gf._get(f"/expirations/all/{coin.upper()}")})
-    except GammaFlipError as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
-
-
-@gammaflip_bp.route("/<coin>/discover2", methods=["GET"])
-def gamma_flip_discover2(coin):
-    """Probe by-strike using a REAL expiry code.
-
-    /expirations/all/{coin} works and returns codes like 14SEP26. GEX by
-    strike is computed per expiration, so the endpoint most likely wants
-    one of those as a path segment or query param.
-    """
+@gammaflip_bp.route("/<coin>/discover3", methods=["GET"])
+def gamma_flip_discover3(coin):
+    """Capture 404 BODIES (they may name valid routes) and try real exchanges."""
     import gammaflip_client as gf
     coin = coin.upper()
     out = {"coin": coin}
 
-    # Pull a live expiry to test with
-    try:
-        exp_data = gf._get(f"/expirations/all/{coin}")
-        expiries = (exp_data.get("data", {}) or {}).get("expirations", [])
-    except GammaFlipError as e:
-        return jsonify({"error": f"could not list expiries: {e}"}), 502
+    def probe(path):
+        try:
+            r = requests.get(f"{gf.API_BASE}{path}", headers=gf._headers(), timeout=8)
+            return {"path": path, "code": r.status_code, "body": r.text[:600]}
+        except Exception as e:
+            return {"path": path, "error": str(e)[:200]}
 
-    if not expiries:
-        return jsonify({"error": "no expiries returned"}), 502
+    # What does a 404 body actually say? Use a nonsense path as control.
+    out["error_body_sample"] = probe("/definitely-not-a-real-endpoint")
 
-    exp = expiries[0]          # nearest, e.g. 14SEP26
-    out["using_expiry"] = exp
-    out["all_expiries"] = expiries
+    # What exchanges exist?
+    out["exchanges"] = probe("/exchanges")
 
-    templates = [
-        "/gex/by-strike/all/{c}/{e}",
-        "/by-strike/all/{c}/{e}",
-        "/strikes/all/{c}/{e}",
-        "/gex/strikes/all/{c}/{e}",
-        "/gex/by-strike/all/{c}?expiry={e}",
-        "/gex/by-strike/all/{c}?expiration={e}",
-        "/by-strike/all/{c}?expiry={e}",
-        "/strikes/all/{c}?expiry={e}",
-        "/gex/all/{c}/{e}",
-        "/gex/oi/all/{c}/{e}",
-        "/gex/strike-oi/all/{c}/{e}",
-        # aggregate-across-expiries variants
-        "/gex/by-strike/all/{c}/ALL",
-        "/by-strike/all/{c}/ALL",
-        "/strikes/all/{c}",
-        "/by-strike/all/{c}",
-    ]
+    # Try the term-oi shape with each known exchange name, swapping the
+    # resource word. If by-strike is exchange-specific, "all" would 404
+    # while "deribit" succeeds.
+    paths = []
+    for ex in ["deribit", "bybit", "okx", "all"]:
+        for word in ["by-strike", "strike", "strikes", "strike-oi", "oi"]:
+            paths.append(f"/gex/{word}/{ex}/{coin}")
+
+    # Also: maybe it mirrors term-oi exactly but with a different suffix
+    for word in ["strike-gex", "gex-strike", "oi-strike", "strike-oi", "spot-oi"]:
+        paths.append(f"/gex/{word}/all/{coin}")
 
     results = []
-    for t in templates:
-        path = t.format(c=coin, e=exp)
-        url = f"{gf.API_BASE}{path}"
-        try:
-            r = requests.get(url, headers=gf._headers(), timeout=8)
-            entry = {"path": path, "code": r.status_code}
-            if r.ok:
-                entry["body"] = r.text[:1500]
-                results.append(entry)
-                out["RESOLVED"] = path
-                out["results"] = results
-                return jsonify(out)      # stop on first success
-            results.append(entry)
-        except Exception as e:
-            results.append({"path": path, "error": str(e)[:200]})
-
+    for p in paths:
+        r = probe(p)
+        if r.get("code") == 200:
+            out["RESOLVED"] = p
+            out["winner"] = r
+            out["results"] = results
+            return jsonify(out)
+        results.append({"path": p, "code": r.get("code")})
     out["results"] = results
     return jsonify(out)
 
@@ -112,7 +78,6 @@ def gamma_flip_discover2(coin):
 @gammaflip_bp.route("/<coin>/raw", methods=["GET"])
 def gamma_flip_raw(coin):
     try:
-        data = get_term_oi(coin)
-        return jsonify({"ok": True, "data": data})
+        return jsonify({"ok": True, "data": get_term_oi(coin)})
     except GammaFlipError as e:
         return jsonify({"ok": False, "error": str(e)}), 502
