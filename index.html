@@ -590,15 +590,38 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers) {
     ctx.stroke();
   }
   
-  // Draw bars (net GEX per 1% move) - green if positive, red if negative
-  strikes.forEach(s => {
+  // Draw bars (net GEX per 1% move) - HUGE bidirectional bars from center
+  const barWidth = Math.max(chartW / Math.max(strikes.length - 1, 1) * 0.9, 4);
+  const centerY = P.top + chartH * 0.5;
+  
+  console.log(`Drawing ${strikes.length} bars | barWidth: ${barWidth}px | centerY: ${centerY}px | maxNetGex: ${maxNetGex}`);
+  
+  let barsDrawn = 0;
+  strikes.forEach((s, idx) => {
     const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
-    const barH = (s.net_gex / maxNetGex) * (chartH * 0.6);
-    const barY = P.top + chartH * 0.6 - barH;
+    const netGex = s.net_gex || 0;
+    const absHeight = (Math.abs(netGex) / maxNetGex) * (chartH * 0.65);
     
-    ctx.fillStyle = s.net_gex >= 0 ? 'rgba(127,255,110,0.4)' : 'rgba(255,77,110,0.4)';
-    ctx.fillRect(x - 1.5, barY, 3, barH);
+    if (idx < 3 || idx >= strikes.length - 3) {
+      console.log(`Bar ${idx}: strike=${s.strike.toFixed(1)}, netGex=${netGex.toFixed(0)}, x=${x.toFixed(0)}, height=${absHeight.toFixed(0)}`);
+    }
+    
+    if (netGex >= 0) {
+      ctx.fillStyle = 'rgba(0,255,100,1)';
+      ctx.fillRect(x - barWidth/2, centerY - absHeight, barWidth, absHeight);
+      ctx.strokeStyle = 'rgba(0,200,80,1)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - barWidth/2, centerY - absHeight, barWidth, absHeight);
+    } else {
+      ctx.fillStyle = 'rgba(255,0,80,1)';
+      ctx.fillRect(x - barWidth/2, centerY, barWidth, absHeight);
+      ctx.strokeStyle = 'rgba(200,0,60,1)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - barWidth/2, centerY, barWidth, absHeight);
+    }
+    barsDrawn++;
   });
+  console.log(`✓ Finished drawing ${barsDrawn} bars`);
   
   // Draw line (absolute GEX)
   ctx.strokeStyle = 'rgba(110,180,255,0.7)';
