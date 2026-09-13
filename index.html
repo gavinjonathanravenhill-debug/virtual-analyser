@@ -623,6 +623,65 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers) {
   });
   console.log(`✓ Finished drawing ${barsDrawn} bars`);
   
+  // Draw strike price labels on x-axis
+  ctx.fillStyle = 'rgba(200,200,200,0.7)';
+  ctx.font = '10px "Space Mono"';
+  ctx.textAlign = 'center';
+  const labelInterval = Math.max(1, Math.floor(strikes.length / 8));
+  strikes.forEach((s, idx) => {
+    if (idx % labelInterval === 0 || idx === 0 || idx === strikes.length - 1) {
+      const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
+      ctx.fillText(Math.round(s.strike).toString(), x, P.top + chartH + 20);
+    }
+  });
+  
+  // Draw regime labels (P1, P2, A1, A2) with bright colors
+  ctx.font = 'bold 12px "Space Mono"';
+  ctx.textAlign = 'center';
+  Object.entries(regimeLabels || {}).forEach(([strike, label]) => {
+    const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
+    const peak = strikes.find(s => Math.abs(s.strike - parseFloat(strike)) < strikeRange * 0.02);
+    
+    if (peak) {
+      const centerY = P.top + chartH * 0.5;
+      const absGex = peak.abs_gex || 0;
+      const peakY = centerY - ((absGex / maxAbsGex) * (chartH * 0.45)) - 30;
+      
+      if (label.includes('P')) {
+        ctx.fillStyle = 'rgba(127,255,110,0.95)';
+        ctx.strokeStyle = 'rgba(127,255,110,1)';
+      } else {
+        ctx.fillStyle = 'rgba(110,180,255,0.95)';
+        ctx.strokeStyle = 'rgba(110,180,255,1)';
+      }
+      ctx.fillRect(sx - 22, peakY - 14, 44, 20);
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sx - 22, peakY - 14, 44, 20);
+      ctx.fillStyle = '#060810';
+      ctx.fillText(label, sx, peakY + 3);
+    }
+  });
+  
+  // Draw vol triggers (N1, N2, A1, A2) - volatility walls
+  ctx.font = 'bold 11px "Space Mono"';
+  Object.entries(volTriggers || {}).forEach(([strike, data]) => {
+    const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
+    const isNegative = data.includes('N') || strike.includes('N');
+    
+    ctx.strokeStyle = isNegative ? 'rgba(255,100,100,0.8)' : 'rgba(100,200,255,0.8)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(sx, P.top);
+    ctx.lineTo(sx, P.top + chartH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    const labelY = P.top + 15;
+    ctx.fillStyle = isNegative ? 'rgba(255,100,100,1)' : 'rgba(100,200,255,1)';
+    ctx.fillText(data, sx, labelY);
+  });
+  
   // Draw line (absolute GEX)
   ctx.strokeStyle = 'rgba(110,180,255,0.7)';
   ctx.lineWidth = 2;
