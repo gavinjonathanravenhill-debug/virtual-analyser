@@ -631,7 +631,7 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   strikes.forEach((s, idx) => {
     if (idx % labelInterval === 0) {
       const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
-      ctx.fillText((s.strike / 1000).toFixed(1) + 'k', x, H - 12);
+      ctx.fillText((axisMode === 'days_to_expiry') ? (s.label || Math.round(s.strike) + 'd') : ((s.strike / 1000).toFixed(1) + 'k'), x, H - 12);
     }
   });
   
