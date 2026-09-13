@@ -623,15 +623,22 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers) {
   });
   console.log(`✓ Finished drawing ${barsDrawn} bars`);
   
-  // Draw strike price labels on x-axis
-  ctx.fillStyle = 'rgba(200,200,200,0.7)';
-  ctx.font = 'bold 14px "Space Mono"';  // Much bigger
+  // Draw strike price labels on x-axis - BIG AND BRIGHT
+  ctx.font = 'bold 18px "Space Mono"';
   ctx.textAlign = 'center';
-  const labelInterval = Math.max(1, Math.floor(strikes.length / 8));
+  const labelInterval = Math.max(1, Math.floor(strikes.length / 6));
   strikes.forEach((s, idx) => {
     if (idx % labelInterval === 0 || idx === 0 || idx === strikes.length - 1) {
       const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
-      ctx.fillText(Math.round(s.strike).toString(), x, H - 15);  // Bottom of canvas
+      const y = H - 25;
+      
+      // Draw background box for contrast
+      ctx.fillStyle = 'rgba(20,20,40,0.8)';
+      ctx.fillRect(x - 28, y - 14, 56, 20);
+      
+      // Draw white text
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(Math.round(s.strike).toString(), x, y);
     }
   });
   
