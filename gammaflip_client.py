@@ -253,3 +253,40 @@ def get_gamma_summary(coin: str):
         "downside_gex": downside_gex,
         "gamma_regime": "bullish" if agg_total_gex > 0 else "bearish",
     }
+
+def parse_term_structure_fallback(raw_data: dict):
+    """Fallback view: gamma by EXPIRY, honestly labelled as such.
+
+    This is not a strike surface. The x-axis is days-to-expiry. It exists
+    so the panel shows something real while the by-strike endpoint is
+    unresolved - never to masquerade as strike data.
+    """
+    data = raw_data.get("data", raw_data)
+    expirations = data.get("expirations", [])
+    meta = data.get("metadata", {}) or {}
+    spot = meta.get("current_price", 0)
+    if not expirations:
+        raise GammaFlipError("No expirations in term-oi response")
+
+    rows = []
+    for exp in expirations:
+        ex = exp.get("exchanges", {}) or {}
+        book = (ex.get("deribit") or ex.get("bybit")
+                or (list(ex.values())[0] if ex else None))
+        if not book:
+            continue
+        net = float(book.get("total_gex", 0) or 0)
+        rows.append({
+            "x": float(exp.get("days_to_expiry", 0) or 0),
+            "label": exp.get("date", ""),
+            "net_gex": net,
+            "abs_gex": float(book.get("abs_gex", 0) or 0) or abs(net),
+        })
+    rows.sort(key=lambda r: r["x"])
+    return {
+        "spot": spot,
+        "rows": rows,
+        "axis": "days_to_expiry",
+        "source": "term-structure-fallback",
+        "note": "Term structure, not strikes. by-strike endpoint unresolved.",
+    }
