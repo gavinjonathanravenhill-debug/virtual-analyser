@@ -591,7 +591,7 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers) {
   }
   
   // Draw bars (net GEX per 1% move) - HUGE bidirectional bars from center
-  const barWidth = Math.max(chartW / Math.max(strikes.length - 1, 1) * 0.9, 4);
+  const barWidth = Math.max(chartW / Math.max(strikes.length - 1, 1) * 2.5, 8);  // 2.5x wider
   const centerY = P.top + chartH * 0.5;
   
   console.log(`Drawing ${strikes.length} bars | barWidth: ${barWidth}px | centerY: ${centerY}px | maxNetGex: ${maxNetGex}`);
@@ -625,13 +625,13 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers) {
   
   // Draw strike price labels on x-axis
   ctx.fillStyle = 'rgba(200,200,200,0.7)';
-  ctx.font = '10px "Space Mono"';
+  ctx.font = 'bold 14px "Space Mono"';  // Much bigger
   ctx.textAlign = 'center';
   const labelInterval = Math.max(1, Math.floor(strikes.length / 8));
   strikes.forEach((s, idx) => {
     if (idx % labelInterval === 0 || idx === 0 || idx === strikes.length - 1) {
       const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
-      ctx.fillText(Math.round(s.strike).toString(), x, P.top + chartH + 20);
+      ctx.fillText(Math.round(s.strike).toString(), x, H - 15);  // Bottom of canvas
     }
   });
   
