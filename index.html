@@ -598,7 +598,9 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   
   let barsDrawn = 0;
   strikes.forEach((s, idx) => {
-    const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
+    const x = (axisMode === 'days_to_expiry')
+      ? P.left + (idx / Math.max(strikes.length - 1, 1)) * chartW
+      : P.left + ((s.strike - minStrike) / strikeRange) * chartW;
     const netGex = s.net_gex || 0;
     const absHeight = (Math.abs(netGex) / maxNetGex) * (chartH * 0.7);
     
@@ -627,10 +629,12 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   ctx.font = 'bold 12px "Space Mono"';
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(150,150,150,0.9)';
-  const labelInterval = Math.max(1, Math.floor(strikes.length / 6));
+  const labelInterval = (axisMode === 'days_to_expiry') ? 2 : Math.max(1, Math.floor(strikes.length / 7));
   strikes.forEach((s, idx) => {
     if (idx % labelInterval === 0) {
-      const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
+      const x = (axisMode === 'days_to_expiry')
+      ? P.left + (idx / Math.max(strikes.length - 1, 1)) * chartW
+      : P.left + ((s.strike - minStrike) / strikeRange) * chartW;
       ctx.fillText((axisMode === 'days_to_expiry') ? (s.label || Math.round(s.strike) + 'd') : ((s.strike / 1000).toFixed(1) + 'k'), x, H - 12);
     }
   });
@@ -687,8 +691,10 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   ctx.lineWidth = 2;
   ctx.beginPath();
   let first = true;
-  strikes.forEach(s => {
-    const x = P.left + ((s.strike - minStrike) / strikeRange) * chartW;
+  strikes.forEach((s, idx) => {
+    const x = (axisMode === 'days_to_expiry')
+      ? P.left + (idx / Math.max(strikes.length - 1, 1)) * chartW
+      : P.left + ((s.strike - minStrike) / strikeRange) * chartW;
     const lineY = P.top + chartH * 0.6 - ((s.abs_gex / maxAbsGex) * (chartH * 0.8));
     first ? ctx.moveTo(x, lineY) : ctx.lineTo(x, lineY);
     first = false;
