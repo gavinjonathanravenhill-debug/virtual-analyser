@@ -626,7 +626,7 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   console.log(`✓ Finished drawing ${barsDrawn} bars`);
   
   // Draw strike price labels - every 5-6 strikes
-  ctx.font = 'bold 56px "Space Mono"';
+  ctx.font = 'bold 28px "Space Mono"';
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(150,150,150,0.9)';
   const labelInterval = (axisMode === 'days_to_expiry') ? 2 : Math.max(1, Math.floor(strikes.length / 7));
@@ -635,6 +635,7 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
       const x = (axisMode === 'days_to_expiry')
       ? P.left + (idx / Math.max(strikes.length - 1, 1)) * chartW
       : P.left + ((s.strike - minStrike) / strikeRange) * chartW;
+      ctx.fillStyle = '#ffffff';
       ctx.fillText((axisMode === 'days_to_expiry') ? (s.label || Math.round(s.strike) + 'd') : ((s.strike / 1000).toFixed(1) + 'k'), x, H - 12);
     }
   });
@@ -794,33 +795,32 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
 
 
   // ---- current price line ----
-  if (spot >= minStrike && spot <= maxStrike) {
-    const sx = (axisMode === 'days_to_expiry')
-      ? P.left + chartW * 0.5
-      : P.left + ((spot - minStrike) / strikeRange) * chartW;
 
-    ctx.strokeStyle = 'rgba(255,190,60,0.95)';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([8, 5]);
+
+  // spot price line - clamped so it always renders
+  {
+    const sRaw = (spot - minStrike) / (strikeRange || 1);
+    const sClamped = Math.min(1, Math.max(0, sRaw));
+    const sx = P.left + sClamped * chartW;
+    ctx.strokeStyle = '#ffbe3c';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([10, 6]);
     ctx.beginPath();
     ctx.moveTo(sx, P.top);
     ctx.lineTo(sx, P.top + chartH);
     ctx.stroke();
     ctx.setLineDash([]);
-
     const txt = '$' + Math.round(spot).toLocaleString('en-US');
-    ctx.font = 'bold 26px "Space Mono"';
-    const w = ctx.measureText(txt).width + 24;
-    ctx.fillStyle = 'rgba(255,190,60,1)';
-    ctx.fillRect(sx - w / 2, P.top + 4, w, 34);
+    ctx.font = 'bold 28px "Space Mono"';
+    const w = ctx.measureText(txt).width + 20;
+    ctx.fillStyle = '#ffbe3c';
+    ctx.fillRect(sx - w/2, P.top + 2, w, 36);
     ctx.fillStyle = '#0a0f1e';
     ctx.textAlign = 'center';
-    ctx.fillText(txt, sx, P.top + 29);
-    console.log('spot marker drawn at x=' + Math.round(sx) + ' for $' + Math.round(spot));
-  } else {
-    console.log('spot ' + spot + ' outside range ' + minStrike + '-' + maxStrike);
+    ctx.fillText(txt, sx, P.top + 28);
+    console.log('SPOT LINE x=' + Math.round(sx) + ' raw=' + sRaw.toFixed(3)
+                + ' spot=' + spot + ' range=' + minStrike + '-' + maxStrike);
   }
-
 }
 
 </script>
