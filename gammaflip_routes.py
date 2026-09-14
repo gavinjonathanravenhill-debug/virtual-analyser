@@ -22,18 +22,28 @@ def gamma_flip_summary(coin):
 
 @gammaflip_bp.route("/<coin>/surface", methods=["GET"])
 def gamma_flip_surface(coin):
-    """Real strikes if we can get them, term structure if not.
+    """Real strikes from Deribit, falling back to term structure.
 
-    The fallback is tagged with axis='days_to_expiry' so the front end
-    can label it truthfully instead of passing expiries off as strikes.
+    Deribit is public and needs no key, and it carries most of the BTC
+    options open interest - so it gives a genuine strike axis rather
+    than expiry data wearing a price label.
     """
+    # 1. Deribit - real strikes
+    try:
+        import deribit_gex
+        return jsonify({"ok": True, "data": deribit_gex.get_surface(coin.upper())})
+    except Exception as e:
+        deribit_err = str(e)
+
+    # 2. GammaFlip by-strike, if the endpoint ever resolves
     try:
         return jsonify({"ok": True, "data": get_gamma_surface(coin)})
     except GammaFlipError:
         pass
+
+    # 3. Term structure, clearly labelled as not-strikes
     try:
         fb = parse_term_structure_fallback(get_term_oi(coin))
-        # Shape it for the existing chart, but keep the axis honest.
         strikes = [{"strike": r["x"], "net_gex": r["net_gex"],
                     "abs_gex": r["abs_gex"], "label": r["label"]}
                    for r in fb["rows"]]
@@ -42,10 +52,11 @@ def gamma_flip_surface(coin):
             "regime_labels": {}, "vol_triggers": {},
             "axis": "days_to_expiry",
             "source": "term-structure-fallback",
-            "note": fb["note"],
+            "note": fb["note"], "deribit_error": deribit_err,
         }})
     except GammaFlipError as e:
-        return jsonify({"ok": False, "error": str(e)}), 502
+        return jsonify({"ok": False, "error": str(e),
+                        "deribit_error": deribit_err}), 502
 
 
 @gammaflip_bp.route("/<coin>/sweep", methods=["GET"])
