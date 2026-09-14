@@ -43,6 +43,12 @@ def requires_auth(f):
             return Response("Login required", 401, {"WWW-Authenticate": "Basic realm=\"Virtual Analyser\""})
         return f(*args, **kwargs)
     return decorated
+
+
+@app.route("/healthz")
+def healthz():
+    """Unauthenticated - Railway's healthcheck has no credentials."""
+    return {"ok": True}, 200
 HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY", "")
 
 @app.route("/")
