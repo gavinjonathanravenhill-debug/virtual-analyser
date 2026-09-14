@@ -574,7 +574,7 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   const minStrike = Math.min(...strikes.map(s => s.strike));
   const maxStrike = Math.max(...strikes.map(s => s.strike));
   const strikeRange = maxStrike - minStrike;
-  const maxNetGex = Math.max(...strikes.map(s => s.net_gex || 0), 1);
+  const maxNetGex = Math.max(...strikes.map(s => Math.abs(s.net_gex || 0)), 1);
   const maxAbsGex = Math.max(...strikes.map(s => s.abs_gex || 0), 1);
   
   // Background
@@ -649,7 +649,7 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
     if (peak) {
       const centerY = P.top + chartH * 0.5;
       const absGex = peak.abs_gex || 0;
-      const peakY = centerY - ((absGex / maxAbsGex) * (chartH * 0.45)) - 30;
+      const peakY = centerY - ((absGex / maxAbsGex) * (chartH * 0.46)) - 30;
       
       if (label.includes('P')) {
         ctx.fillStyle = 'rgba(127,255,110,0.95)';
