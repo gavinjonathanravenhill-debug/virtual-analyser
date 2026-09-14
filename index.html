@@ -765,21 +765,6 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
     }
   }
 
-  // ---- current price marker ----
-  {
-    const sx = P.left + ((spot - minStrike) / strikeRange) * chartW;
-    ctx.fillStyle = 'rgba(255,190,60,0.9)';
-    ctx.fillRect(sx - 2, P.top, 4, chartH);           // solid bar
-    const txt = '$' + Math.round(spot).toLocaleString('en-US');
-    ctx.font = 'bold 20px "Space Mono"';
-    const w = ctx.measureText(txt).width + 16;
-    ctx.fillStyle = 'rgba(255,190,60,0.95)';
-    ctx.fillRect(sx - w / 2, P.top - 28, w, 24);       // label chip
-    ctx.fillStyle = '#0a0f1e';
-    ctx.textAlign = 'center';
-    ctx.fillText(txt, sx, P.top - 10);
-  }
-
   // ---- legend ----
   {
     const lx = W - P.right - 230, ly = P.top + 12;
@@ -805,6 +790,35 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
     ctx.fillRect(lx + 12, ly + 66, 18, 14);
     ctx.fillStyle = '#ffffff';
     ctx.fillText('Spot price', lx + 40, ly + 78);
+  }
+
+
+  // ---- current price line ----
+  if (spot >= minStrike && spot <= maxStrike) {
+    const sx = (axisMode === 'days_to_expiry')
+      ? P.left + chartW * 0.5
+      : P.left + ((spot - minStrike) / strikeRange) * chartW;
+
+    ctx.strokeStyle = 'rgba(255,190,60,0.95)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    ctx.moveTo(sx, P.top);
+    ctx.lineTo(sx, P.top + chartH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const txt = '$' + Math.round(spot).toLocaleString('en-US');
+    ctx.font = 'bold 26px "Space Mono"';
+    const w = ctx.measureText(txt).width + 24;
+    ctx.fillStyle = 'rgba(255,190,60,1)';
+    ctx.fillRect(sx - w / 2, P.top + 4, w, 34);
+    ctx.fillStyle = '#0a0f1e';
+    ctx.textAlign = 'center';
+    ctx.fillText(txt, sx, P.top + 29);
+    console.log('spot marker drawn at x=' + Math.round(sx) + ' for $' + Math.round(spot));
+  } else {
+    console.log('spot ' + spot + ' outside range ' + minStrike + '-' + maxStrike);
   }
 
 }
