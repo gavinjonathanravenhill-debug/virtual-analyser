@@ -626,7 +626,7 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   console.log(`✓ Finished drawing ${barsDrawn} bars`);
   
   // Draw strike price labels - every 5-6 strikes
-  ctx.font = 'bold 12px "Space Mono"';
+  ctx.font = 'bold 56px "Space Mono"';
   ctx.textAlign = 'center';
   ctx.fillStyle = 'rgba(150,150,150,0.9)';
   const labelInterval = (axisMode === 'days_to_expiry') ? 2 : Math.max(1, Math.floor(strikes.length / 7));
