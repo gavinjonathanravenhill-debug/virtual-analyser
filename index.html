@@ -797,19 +797,19 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
   // ---- current price line ----
 
 
-  // spot price line - clamped so it always renders
+
+  // spot line + on-canvas diagnostic
   {
     const sRaw = (spot - minStrike) / (strikeRange || 1);
-    const sClamped = Math.min(1, Math.max(0, sRaw));
-    const sx = P.left + sClamped * chartW;
+    const sx = P.left + Math.min(1, Math.max(0, sRaw)) * chartW;
+
     ctx.strokeStyle = '#ffbe3c';
-    ctx.lineWidth = 4;
-    ctx.setLineDash([10, 6]);
+    ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.moveTo(sx, P.top);
     ctx.lineTo(sx, P.top + chartH);
     ctx.stroke();
-    ctx.setLineDash([]);
+
     const txt = '$' + Math.round(spot).toLocaleString('en-US');
     ctx.font = 'bold 28px "Space Mono"';
     const w = ctx.measureText(txt).width + 20;
@@ -818,8 +818,14 @@ function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
     ctx.fillStyle = '#0a0f1e';
     ctx.textAlign = 'center';
     ctx.fillText(txt, sx, P.top + 28);
-    console.log('SPOT LINE x=' + Math.round(sx) + ' raw=' + sRaw.toFixed(3)
-                + ' spot=' + spot + ' range=' + minStrike + '-' + maxStrike);
+
+    // diagnostic printed on the chart so no console is needed
+    ctx.font = 'bold 16px "Space Mono"';
+    ctx.fillStyle = '#ff4da6';
+    ctx.textAlign = 'left';
+    ctx.fillText('spot=' + Math.round(spot) + '  range=' + Math.round(minStrike)
+                 + '-' + Math.round(maxStrike) + '  x=' + Math.round(sx)
+                 + '  frac=' + sRaw.toFixed(2), P.left + 8, P.top + chartH - 8);
   }
 }
 
