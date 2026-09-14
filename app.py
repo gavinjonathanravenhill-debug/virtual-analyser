@@ -6,10 +6,19 @@ import os, requests
 from flask import Flask, jsonify, render_template_string, request, Response
 import functools
 from flask_cors import CORS
-from bot import start_bot_thread
+try:
+    from bot import start_bot_thread
+except Exception as _e:
+    print(f"bot import failed, continuing without it: {_e}")
+    def start_bot_thread():
+        pass
 from mm_check import analyse_market_maker
 from gammaflip_routes import gammaflip_bp
-start_bot_thread()
+try:
+    start_bot_thread()
+except Exception as _e:
+    # The bot must never be able to take the web server down with it.
+    print(f"bot thread failed to start, continuing: {_e}")
 
 app = Flask(__name__)
 app.register_blueprint(gammaflip_bp)
