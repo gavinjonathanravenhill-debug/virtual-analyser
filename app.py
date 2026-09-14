@@ -22,6 +22,11 @@ except Exception as _e:
 
 app = Flask(__name__)
 app.register_blueprint(gammaflip_bp)
+
+
+@app.route("/health")
+def health():
+    return {"ok": True}, 200
 CORS(app)
 
 MORALIS_API_KEY = os.environ.get("MORALIS_API_KEY", "")
