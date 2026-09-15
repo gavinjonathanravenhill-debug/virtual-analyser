@@ -843,13 +843,6 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
     ctx.fillStyle = '#0a0f1e';
     ctx.textAlign = 'center';
     ctx.fillText(txt, sx, P.top + 28);
-
-    // diagnostic printed on the chart so no console is needed
-    ctx.font = 'bold 16px "Space Mono"';
-    ctx.fillStyle = '#ff4da6';
-    ctx.textAlign = 'left';
-    ctx.fillText('spot=' + Math.round(spot) + '  range=' + Math.round(minStrike)
-                 + '-' + Math.round(maxStrike) + '  x=' + Math.round(sx)
                  + '  frac=' + sRaw.toFixed(2), P.left + 8, P.top + chartH - 8);
   }
 }
