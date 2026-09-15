@@ -658,7 +658,7 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
   });
   
   // Draw regime labels (P1, P2, A1, A2) with bright colors
-  ctx.font = 'bold 12px "Space Mono"';
+  ctx.font = 'bold 20px "Space Mono"';
   ctx.textAlign = 'center';
   Object.entries(regimeLabels || {}).forEach(([strike, label]) => {
     const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
@@ -667,7 +667,7 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
     if (peak) {
       const centerY = P.top + chartH * 0.5;
       const absGex = peak.abs_gex || 0;
-      const peakY = centerY - ((absGex / maxAbsGex) * (chartH * 0.46)) - 30;
+      const peakY = centerY - ((absGex / maxAbsGex) * (chartH * 0.47)) - 30;
       
       if (label.includes('P')) {
         ctx.fillStyle = 'rgba(127,255,110,0.95)';
@@ -685,7 +685,7 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
   });
   
   // Draw vol triggers (N1, N2, A1, A2) - volatility walls
-  ctx.font = 'bold 11px "Space Mono"';
+  ctx.font = 'bold 20px "Space Mono"';
   Object.entries(volTriggers || {}).forEach(([strike, data]) => {
     const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
     const lbl = (data && data.label) ? data.label : String(data);
@@ -776,7 +776,7 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
       ctx.lineTo(x, P.top + chartH);
       ctx.stroke();
       if (isLabel) {
-        ctx.font = 'bold 20px "Space Mono"';
+        ctx.font = 'bold 28px "Space Mono"';
         ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.fillText('$' + price.toLocaleString('en-US'), x, H - 14);
