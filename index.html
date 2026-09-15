@@ -368,7 +368,17 @@ async function fetchGammaFlip() {
         const _n = parseFloat(String(_pEl.textContent).replace(/[^0-9.]/g, ''));
         if (_n > 1000) liveSpot = _n;
       }
-      drawGammaChart(strikes, liveSpot, d.regime_labels || {}, d.vol_triggers || {}, d.axis);
+            // HEADER_SPOT: prefer the live header price over the cached one
+      let _hdr = liveSpot;
+      try {
+        const _el = document.getElementById('btc-price')
+                 || document.querySelector('.sv');
+        if (_el) {
+          const _n = parseFloat(String(_el.textContent).replace(/[^0-9.]/g, ''));
+          if (_n > 1000) _hdr = _n;
+        }
+      } catch (e) {}
+      drawGammaChart(strikes, _hdr, d.regime_labels || {}, d.vol_triggers || {}, d.axis);
     }
     
     updatedEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
