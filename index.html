@@ -557,6 +557,23 @@ window.addEventListener('load', () => {
 });
 
 function drawGammaChart(strikes, spot, regimeLabels, volTriggers, axisMode) {
+  try {
+    return _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode);
+  } catch (err) {
+    const c = document.getElementById('gamma-canvas');
+    if (c && c.getContext) {
+      const x = c.getContext('2d');
+      x.fillStyle = '#ff3366';
+      x.font = 'bold 18px monospace';
+      x.textAlign = 'left';
+      x.fillText('DRAW ERROR: ' + (err && err.message ? err.message : err), 30, 40);
+      x.fillText(String(err && err.stack ? err.stack.split('\n')[1] || '' : ''), 30, 66);
+    }
+    console.error('drawGammaChart failed:', err);
+  }
+}
+
+function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode) {
   const canvas = document.getElementById('gamma-canvas');
   if (!canvas || !canvas.getContext) return;
   
