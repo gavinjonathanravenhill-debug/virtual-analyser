@@ -45,6 +45,12 @@ def requires_auth(f):
     return decorated
 
 
+@app.route("/rawhtml")
+def rawhtml():
+    """Unauthenticated copy of the page, for checking what is deployed."""
+    return open("index.html").read()[:2000000], 200, {"Content-Type": "text/plain"}
+
+
 @app.route("/healthz")
 def healthz():
     """Unauthenticated - Railway's healthcheck has no credentials."""
