@@ -649,68 +649,8 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
   });
   console.log(`✓ Finished drawing ${barsDrawn} bars`);
   
-  // Draw strike price labels - every 5-6 strikes
-  ctx.font = 'bold 28px "Space Mono"';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(150,150,150,0.9)';
-  const labelInterval = (axisMode === 'days_to_expiry') ? 2 : Math.max(1, Math.floor(strikes.length / 7));
-  strikes.forEach((s, idx) => {
-    if (idx % labelInterval === 0) {
-      const x = (axisMode === 'days_to_expiry')
-      ? P.left + (idx / Math.max(strikes.length - 1, 1)) * chartW
-      : P.left + ((s.strike - minStrike) / strikeRange) * chartW;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText((axisMode === 'days_to_expiry') ? (s.label || Math.round(s.strike) + 'd') : ((s.strike / 1000).toFixed(1) + 'k'), x, H - 12);
-    }
-  });
-  
-  // Draw regime labels (P1, P2, A1, A2) with bright colors
-  ctx.font = 'bold 20px "Space Mono"';
-  ctx.textAlign = 'center';
-  Object.entries(regimeLabels || {}).forEach(([strike, label]) => {
-    const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
-    const peak = strikes.find(s => Math.abs(s.strike - parseFloat(strike)) < strikeRange * 0.02);
-    
-    if (peak) {
-      const centerY = P.top + chartH * 0.5;
-      const absGex = peak.abs_gex || 0;
-      const peakY = centerY - ((absGex / maxAbsGex) * (chartH * 0.47)) - 30;
-      
-      if (label.includes('P')) {
-        ctx.fillStyle = 'rgba(127,255,110,0.95)';
-        ctx.strokeStyle = 'rgba(127,255,110,1)';
-      } else {
-        ctx.fillStyle = 'rgba(110,180,255,0.95)';
-        ctx.strokeStyle = 'rgba(110,180,255,1)';
-      }
-      ctx.fillRect(sx - 22, peakY - 14, 44, 20);
-      ctx.lineWidth = 2;
-      ctx.strokeRect(sx - 22, peakY - 14, 44, 20);
-      ctx.fillStyle = '#060810';
-      ctx.fillText(label, sx, peakY + 3);
-    }
-  });
-  
   // Draw vol triggers (N1, N2, A1, A2) - volatility walls
   ctx.font = 'bold 20px "Space Mono"';
-  Object.entries(volTriggers || {}).forEach(([strike, data]) => {
-    const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
-    const lbl = (data && data.label) ? data.label : String(data);
-    const isNegative = lbl.indexOf('N') === 0;
-    
-    ctx.strokeStyle = isNegative ? 'rgba(255,100,100,0.8)' : 'rgba(100,200,255,0.8)';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.moveTo(sx, P.top);
-    ctx.lineTo(sx, P.top + chartH);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    
-    const labelY = P.top + 15;
-    ctx.fillStyle = isNegative ? 'rgba(255,100,100,1)' : 'rgba(100,200,255,1)';
-    ctx.fillText(lbl, sx, labelY);
-  });
   
   // Draw line (absolute GEX)
   ctx.strokeStyle = 'rgba(110,180,255,0.7)';
@@ -736,21 +676,6 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
   ctx.stroke();
   ctx.setLineDash([]);
   
-  // Draw regime labels (P1, P2, A1, A2)
-  ctx.fillStyle = 'rgba(127,255,110,0.8)';
-  ctx.font = 'bold 10px "Space Mono"';
-  ctx.textAlign = 'center';
-  Object.entries(regimeLabels).forEach(([strike, label]) => {
-    const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
-    const peak = strikes.find(s => s.strike === parseFloat(strike));
-    const peakY = peak ? P.top + chartH * 0.6 - ((peak.net_gex / maxNetGex) * (chartH * 0.6)) : P.top + chartH * 0.3;
-    
-    ctx.fillStyle = label.includes('P') ? 'rgba(127,255,110,0.9)' : 'rgba(110,180,255,0.9)';
-    ctx.fillRect(sx - 18, peakY - 14, 36, 16);
-    ctx.fillStyle = '#060810';
-    ctx.fillText(label, sx, peakY - 5);
-  });
-  
   // Axis labels
   ctx.fillStyle = 'var(--muted)';
   ctx.font = '9px "Space Mono"';
@@ -763,33 +688,6 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
   ctx.fillText('Net GEX/1%', W - P.right + 20, P.top + 12);
   ctx.fillStyle = 'rgba(110,180,255,0.5)';
   ctx.fillText('Abs GEX', W - P.right + 20, P.top + 26);
-
-  // ---- price gridlines every $100 (price axis only) ----
-  if (axisMode !== 'days_to_expiry') {
-    const step = 100;
-    const firstTick = Math.ceil(minStrike / step) * step;
-    const tickCount = Math.floor((maxStrike - firstTick) / step);
-    // Label every Nth tick so text never collides
-    const labelEvery = Math.max(1, Math.ceil((tickCount + 1) / 8));
-    let t = 0;
-    for (let price = firstTick; price <= maxStrike; price += step, t++) {
-      const x = P.left + ((price - minStrike) / strikeRange) * chartW;
-      const isLabel = (t % labelEvery === 0);
-      ctx.strokeStyle = isLabel ? 'rgba(255,255,255,0.22)'
-                                : 'rgba(255,255,255,0.07)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x, P.top);
-      ctx.lineTo(x, P.top + chartH);
-      ctx.stroke();
-      if (isLabel) {
-        ctx.font = 'bold 28px "Space Mono"';
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.fillText('$' + price.toLocaleString('en-US'), x, H - 14);
-      }
-    }
-  }
 
   // ---- legend ----
   {
@@ -851,6 +749,53 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
     ctx.fillText('spot=' + Math.round(spot) + '  range=' + Math.round(minStrike)
                  + '-' + Math.round(maxStrike) + '  x=' + Math.round(sx)
                  + '  frac=' + sRaw.toFixed(2), P.left + 8, P.top + chartH - 8);
+  }
+
+  // ---- axis: ticks every $100, labels every $1000 ----
+  if (axisMode !== 'days_to_expiry') {
+    const first = Math.ceil(minStrike / 100) * 100;
+    for (let p = first; p <= maxStrike; p += 100) {
+      const x = P.left + ((p - minStrike) / strikeRange) * chartW;
+      const isLbl = (p % 1000 === 0);
+      ctx.strokeStyle = isLbl ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.05)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, P.top); ctx.lineTo(x, P.top + chartH); ctx.stroke();
+      if (isLbl) {
+        ctx.font = '400 14px "Space Mono"';
+        ctx.fillStyle = 'rgba(230,230,240,0.85)';
+        ctx.textAlign = 'center';
+        ctx.fillText('$' + (p/1000).toFixed(0) + 'k', x, H - 14);
+      }
+    }
+  }
+
+  // ---- badges at the bar tips, one per strike ----
+  {
+    const seen = new Set();
+    const centreY = P.top + chartH * 0.5;
+    const place = (strike, label, isNeg) => {
+      const key = String(Math.round(parseFloat(strike)));
+      if (seen.has(key)) return;
+      seen.add(key);
+      const row = strikes.find(s => Math.abs(s.strike - parseFloat(strike)) < 1);
+      if (!row) return;
+      const x = P.left + ((row.strike - minStrike) / strikeRange) * chartW;
+      const h = (Math.abs(row.net_gex || 0) / maxNetGex) * (chartH * 0.47);
+      const tip = (row.net_gex >= 0) ? (centreY - h - 6) : (centreY + h + 26);
+      ctx.font = 'bold 15px "Space Mono"';
+      const w = ctx.measureText(label).width + 16;
+      ctx.fillStyle = isNeg ? 'rgba(255,60,90,0.95)' : 'rgba(120,255,120,0.95)';
+      ctx.fillRect(x - w/2, tip - 18, w, 22);
+      ctx.strokeStyle = isNeg ? 'rgba(255,140,160,1)' : 'rgba(150,255,150,1)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x - w/2, tip - 18, w, 22);
+      ctx.fillStyle = '#0a0f1e';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, x, tip - 3);
+    };
+    Object.entries(volTriggers || {}).forEach(([k, v]) =>
+      place(k, (v && v.label) ? v.label : String(v), true));
+    Object.entries(regimeLabels || {}).forEach(([k, v]) => place(k, String(v), false));
   }
 }
 
