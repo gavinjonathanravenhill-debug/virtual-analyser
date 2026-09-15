@@ -362,6 +362,7 @@ async function fetchGammaFlip() {
     
     if (strikes.length > 0 && spot > 0) {
       // Prefer the live header price over Deribit's cached underlying_price
+      window._lastGammaData = {strikes: strikes, regime: d.regime_labels || {}, triggers: d.vol_triggers || {}, axis: d.axis};
       let liveSpot = spot;
       const _pEl = document.querySelector('.sv, #btc-price, [id*="btc"]');
       if (_pEl) {
@@ -847,6 +848,17 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
   }
 }
 
+
+// Keep the spot marker in step with the header price
+setInterval(function () {
+  const g = window._lastGammaData;
+  if (!g || !g.strikes || !g.strikes.length) return;
+  const el = document.querySelector('.sv, #btc-price, [id*="btc"]');
+  if (!el) return;
+  const n = parseFloat(String(el.textContent).replace(/[^0-9.]/g, ''));
+  if (!(n > 1000)) return;
+  drawGammaChart(g.strikes, n, g.regime, g.triggers, g.axis);
+}, 5000);
 </script>
 
 </script><script>
