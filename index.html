@@ -361,7 +361,14 @@ async function fetchGammaFlip() {
     const spot = d.spot || 0;
     
     if (strikes.length > 0 && spot > 0) {
-      drawGammaChart(strikes, spot, d.regime_labels || {}, d.vol_triggers || {}, d.axis);
+      // Prefer the live header price over Deribit's cached underlying_price
+      let liveSpot = spot;
+      const _pEl = document.querySelector('.sv, #btc-price, [id*="btc"]');
+      if (_pEl) {
+        const _n = parseFloat(String(_pEl.textContent).replace(/[^0-9.]/g, ''));
+        if (_n > 1000) liveSpot = _n;
+      }
+      drawGammaChart(strikes, liveSpot, d.regime_labels || {}, d.vol_triggers || {}, d.axis);
     }
     
     updatedEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
