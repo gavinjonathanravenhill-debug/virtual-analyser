@@ -688,7 +688,8 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
   ctx.font = 'bold 11px "Space Mono"';
   Object.entries(volTriggers || {}).forEach(([strike, data]) => {
     const sx = P.left + ((parseFloat(strike) - minStrike) / strikeRange) * chartW;
-    const isNegative = data.includes('N') || strike.includes('N');
+    const lbl = (data && data.label) ? data.label : String(data);
+    const isNegative = lbl.indexOf('N') === 0;
     
     ctx.strokeStyle = isNegative ? 'rgba(255,100,100,0.8)' : 'rgba(100,200,255,0.8)';
     ctx.lineWidth = 2;
@@ -701,7 +702,7 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
     
     const labelY = P.top + 15;
     ctx.fillStyle = isNegative ? 'rgba(255,100,100,1)' : 'rgba(100,200,255,1)';
-    ctx.fillText(data, sx, labelY);
+    ctx.fillText(lbl, sx, labelY);
   });
   
   // Draw line (absolute GEX)
