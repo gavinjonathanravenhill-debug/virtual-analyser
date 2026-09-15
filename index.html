@@ -845,6 +845,26 @@ function _drawGammaChartInner(strikes, spot, regimeLabels, volTriggers, axisMode
     ctx.fillText(txt, sx, P.top + 28);
                  + '  frac=' + sRaw.toFixed(2), P.left + 8, P.top + chartH - 8);
   }
+
+  // SPOT_MARKER
+  {
+    const sx = P.left + Math.min(1, Math.max(0,
+      (spot - minStrike) / (strikeRange || 1))) * chartW;
+    ctx.strokeStyle = '#ffbe3c';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(sx, P.top);
+    ctx.lineTo(sx, P.top + chartH);
+    ctx.stroke();
+    const txt = '$' + Math.round(spot).toLocaleString('en-US');
+    ctx.font = 'bold 18px "Space Mono"';
+    const w = ctx.measureText(txt).width + 16;
+    ctx.fillStyle = '#ffbe3c';
+    ctx.fillRect(sx - w / 2, P.top + 2, w, 26);
+    ctx.fillStyle = '#0a0f1e';
+    ctx.textAlign = 'center';
+    ctx.fillText(txt, sx, P.top + 21);
+  }
 }
 
 </script>
