@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BTC vs ETH · Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#060810; --surface:#0d1120; --border:#1a2040;
+  --accent:#7fff6e; --accent3:#6eb4ff; --warn:#ffb84d;
+  --danger:#ff4d6e; --text:#e8ecff; --muted:#5a6480;
+  --mono:'Space Mono',monospace; --sans:'Syne',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;padding:28px}
+.wrap{max-width:1600px;margin:0 auto}
+.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:16px;flex-wrap:wrap}
+.kicker{font-family:var(--mono);font-size:11px;letter-spacing:.32em;color:var(--muted)}
+h1{font-size:44px;font-weight:800;letter-spacing:-.02em}
+h1 .dot{color:var(--accent)}
+.btn{font-family:var(--mono);font-size:13px;color:var(--accent);border:1px solid var(--accent);
+     border-radius:8px;padding:10px 18px;text-decoration:none;display:inline-block}
+.btn:hover{background:rgba(127,255,110,.1)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:18px}
+.ct{font-family:var(--mono);font-size:12px;letter-spacing:.22em;color:var(--muted);margin-bottom:16px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:22px;align-items:start}
+.sl{font-family:var(--mono);font-size:11px;letter-spacing:.18em;color:var(--muted);margin-bottom:6px}
+.sv{font-size:34px;font-weight:800;letter-spacing:-.01em}
+.ss{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:4px}
+.btc{color:var(--warn)} .eth{color:var(--accent3)}
+canvas{width:100%;display:block;border-radius:8px;background:rgba(255,255,255,.02);border:1px solid var(--border)}
+.note{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:10px}
+.err{color:var(--danger)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div>
+      <div class="kicker">MACRO INTELLIGENCE · PAIRS</div>
+      <h1>BTC <span class="dot">vs</span> ETH</h1>
+    </div>
+    <a class="btn" href="/">← BTC · Oil dashboard</a>
+  </div>
+
+  <div class="card">
+    <div class="ct">PRICE &amp; CORRELATION</div>
+    <div class="row">
+      <div>
+        <div class="sl">BTC PRICE</div>
+        <div class="sv btc" id="btc-price">—</div>
+        <div class="ss" id="upd">Loading…</div>
+      </div>
+      <div>
+        <div class="sl">ETH PRICE</div>
+        <div class="sv eth" id="eth-price">—</div>
+        <div class="ss" id="ratio">BTC/ETH ratio —</div>
+      </div>
+      <div>
+        <div class="sl">CORRELATION (60 × 1-MIN)</div>
+        <div class="sv" id="corr" style="font-size:30px">—</div>
+        <div class="ss" id="corr-label">&nbsp;</div>
+      </div>
+      <div style="grid-column:span 2;min-width:320px">
+        <div class="sl">NORMALISED · 60 CANDLES</div>
+        <canvas id="pair-canvas" style="height:170px"></canvas>
+        <div class="ss"><span class="btc">■</span> BTC &nbsp; <span class="eth">■</span> ETH</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="ct">ETH GAMMA EXPOSURE · BY STRIKE</div>
+    <canvas id="gamma-canvas" style="height:440px"></canvas>
+    <div class="note" id="gamma-note">Loading ETH gamma…</div>
+  </div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmtUsd = n => '$' + Number(n).toLocaleString('en-US',
+                    {minimumFractionDigits: n < 100 ? 2 : 0, maximumFractionDigits: n < 100 ? 2 : 0});
+
+/* ---------- correlation ---------- */
+function pearson(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (n < 3) return null;
+  const ra = [], rb = [];
+  for (let i = 1; i < n; i++) {           // correlate returns, not levels
+    ra.push((a[i] - a[i-1]) / a[i-1]);
+    rb.push((b[i] - b[i-1]) / b[i-1]);
+  }
+  const m = ra.length;
+  const ma = ra.reduce((s,x)=>s+x,0)/m, mb = rb.reduce((s,x)=>s+x,0)/m;
+  let num=0, da=0, db=0;
+  for (let i=0;i<m;i++){
+    const x=ra[i]-ma, y=rb[i]-mb;
+    num+=x*y; da+=x*x; db+=y*y;
+  }
+  return (da && db) ? num/Math.sqrt(da*db) : null;
+}
+function corrWord(c){
+  const a = Math.abs(c);
+  if (a >= 0.7) return (c<0?'STRONG NEGATIVE':'STRONG POSITIVE');
+  if (a >= 0.4) return (c<0?'WEAK NEGATIVE':'WEAK POSITIVE');
+  return 'UNCORRELATED';
+}
+
+/* ---------- pair chart ---------- */
+function drawPair(btc, eth) {
+  const c = $('pair-canvas'), ctx = c.getContext('2d');
+  const r = c.getBoundingClientRect();
+  c.width = r.width * (window.devicePixelRatio||1);
+  c.height = r.height * (window.devicePixelRatio||1);
+  const W=c.width, H=c.height, P={t:12,b:12,l:8,r:8};
+  ctx.clearRect(0,0,W,H);
+  const norm = arr => {
+    const lo=Math.min(...arr), hi=Math.max(...arr), sp=(hi-lo)||1;
+    return arr.map(v => (v-lo)/sp);
+  };
+  const series = [[norm(btc), '#ffb84d'], [norm(eth), '#6eb4ff']];
+  ctx.strokeStyle='rgba(255,255,255,.06)'; ctx.lineWidth=1;
+  for(let i=0;i<=3;i++){
+    const y=P.t+((H-P.t-P.b)/3)*i;
+    ctx.beginPath(); ctx.moveTo(P.l,y); ctx.lineTo(W-P.r,y); ctx.stroke();
+  }
+  series.forEach(([vals,col])=>{
+    ctx.strokeStyle=col; ctx.lineWidth=2.5; ctx.beginPath();
+    vals.forEach((v,i)=>{
+      const x=P.l+(i/Math.max(vals.length-1,1))*(W-P.l-P.r);
+      const y=P.t+(1-v)*(H-P.t-P.b);
+      i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+    });
+    ctx.stroke();
+  });
+}
+
+/* ---------- ETH gamma chart ---------- */
+let gammaData = null;
+
+function drawGamma(d) {
+  const c = $('gamma-canvas');
+  if (!c || !c.getContext || !d || !d.strikes || !d.strikes.length) return;
+  const ctx = c.getContext('2d');
+  const r = c.getBoundingClientRect();
+  c.width = r.width * (window.devicePixelRatio||1);
+  c.height = r.height * (window.devicePixelRatio||1);
+
+  const W=c.width, H=c.height, P={top:34,bottom:46,left:26,right:26};
+  const cw=W-P.left-P.right, ch=H-P.top-P.bottom;
+  const strikes = d.strikes;
+  const lo = Math.min(...strikes.map(s=>s.strike));
+  const hi = Math.max(...strikes.map(s=>s.strike));
+  const span = (hi-lo)||1;
+  const maxNet = Math.max(...strikes.map(s=>Math.abs(s.net_gex||0)), 1);
+  const mid = P.top + ch*0.5;
+
+  ctx.fillStyle='rgba(8,12,24,.6)'; ctx.fillRect(P.left,P.top,cw,ch);
+
+  // adaptive gridlines: BTC needs $100/$1000, ETH needs much finer
+  const targetTicks = 40;
+  const raw = span/targetTicks;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const tick = [1,2,5,10].map(m=>m*mag).find(v=>v>=raw) || mag*10;
+  const labelEvery = 5;
+  let ti = 0;
+  for (let p = Math.ceil(lo/tick)*tick; p <= hi; p += tick, ti++) {
+    const x = P.left + ((p-lo)/span)*cw;
+    const isLbl = (ti % labelEvery === 0);
+    ctx.strokeStyle = isLbl ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.05)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x,P.top); ctx.lineTo(x,P.top+ch); ctx.stroke();
+    if (isLbl) {
+      ctx.font='400 13px "Space Mono"';
+      ctx.fillStyle='rgba(230,230,240,.85)';
+      ctx.textAlign='center';
+      ctx.fillText(fmtUsd(p), x, H-14);
+    }
+  }
+
+  // centreline
+  ctx.strokeStyle='rgba(180,180,200,.25)'; ctx.setLineDash([5,5]);
+  ctx.beginPath(); ctx.moveTo(P.left,mid); ctx.lineTo(W-P.right,mid); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // bars
+  const bw = Math.max(2, Math.min(9, cw/strikes.length*0.55));
+  strikes.forEach(s=>{
+    const x = P.left + ((s.strike-lo)/span)*cw;
+    const net = s.net_gex||0;
+    const h = (Math.abs(net)/maxNet)*(ch*0.46);
+    ctx.fillStyle = net>=0 ? 'rgba(0,255,100,.9)' : 'rgba(255,0,80,.9)';
+    ctx.fillRect(x-bw/2, net>=0 ? mid-h : mid, bw, h);
+  });
+
+  // spot
+  const spot = d.spot;
+  if (spot >= lo && spot <= hi) {
+    const x = P.left + ((spot-lo)/span)*cw;
+    ctx.strokeStyle='#ffbe3c'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(x,P.top); ctx.lineTo(x,P.top+ch); ctx.stroke();
+    const t = fmtUsd(spot);
+    ctx.font='bold 16px "Space Mono"';
+    const w = ctx.measureText(t).width+16;
+    ctx.fillStyle='#ffbe3c'; ctx.fillRect(x-w/2, P.top-26, w, 23);
+    ctx.fillStyle='#0a0f1e'; ctx.textAlign='center';
+    ctx.fillText(t, x, P.top-9);
+  }
+
+  // badges at bar tips, one per strike, N/P/A
+  const seen = new Set();
+  const place = (strike, label, isNeg) => {
+    const key = String(Math.round(parseFloat(strike)*100));
+    if (seen.has(key)) return;
+    seen.add(key);
+    const row = strikes.find(s=>Math.abs(s.strike-parseFloat(strike))<1e-6);
+    if (!row) return;
+    const x = P.left + ((row.strike-lo)/span)*cw;
+    const h = (Math.abs(row.net_gex||0)/maxNet)*(ch*0.46);
+    const tip = (row.net_gex>=0) ? (mid-h-8) : (mid+h+26);
+    ctx.font='bold 14px "Space Mono"';
+    const w = ctx.measureText(label).width+14;
+    ctx.fillStyle = isNeg ? 'rgba(255,60,90,.95)' : 'rgba(120,255,120,.95)';
+    ctx.fillRect(x-w/2, tip-17, w, 21);
+    ctx.strokeStyle = isNeg ? 'rgba(255,150,170,1)' : 'rgba(160,255,160,1)';
+    ctx.lineWidth=1.5;
+    ctx.strokeRect(x-w/2, tip-17, w, 21);
+    ctx.fillStyle='#0a0f1e'; ctx.textAlign='center';
+    ctx.fillText(label, x, tip-3);
+  };
+  Object.entries(d.vol_triggers||{}).forEach(([k,v])=>
+    place(k, (v&&v.label)?v.label:String(v), true));
+  Object.entries(d.regime_labels||{}).forEach(([k,v])=>place(k,String(v),false));
+
+  // legend
+  const lx = W-P.right-190, ly = P.top+10;
+  ctx.fillStyle='rgba(8,12,24,.88)'; ctx.fillRect(lx,ly,180,78);
+  ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.lineWidth=1; ctx.strokeRect(lx,ly,180,78);
+  ctx.textAlign='left'; ctx.font='400 13px "Space Mono"';
+  [['rgba(0,255,100,.9)','Positive gamma'],
+   ['rgba(255,0,80,.9)','Negative gamma'],
+   ['#ffbe3c','Spot price']].forEach(([col,txt],i)=>{
+    ctx.fillStyle=col; ctx.fillRect(lx+12, ly+14+i*22, 14, 12);
+    ctx.fillStyle='rgba(235,235,245,.9)';
+    ctx.fillText(txt, lx+34, ly+25+i*22);
+  });
+}
+
+/* ---------- data ---------- */
+async function loadPrices() {
+  try {
+    const [b, e] = await Promise.all([
+      fetch('/api/candles?symbol=BTCUSDT').then(r=>r.json()),
+      fetch('/api/candles?symbol=ETHUSDT').then(r=>r.json())
+    ]);
+    const bc = (b.candles||[]).map(k=>k.c);
+    const ec = (e.candles||[]).map(k=>k.c);
+    if (!bc.length || !ec.length) throw new Error('no candles');
+
+    const bp = bc[bc.length-1], ep = ec[ec.length-1];
+    $('btc-price').textContent = fmtUsd(bp);
+    $('eth-price').textContent = fmtUsd(ep);
+    $('ratio').textContent = 'BTC/ETH ratio ' + (bp/ep).toFixed(1);
+    $('upd').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+    const c = pearson(bc, ec);
+    if (c === null) {
+      $('corr').textContent = '—';
+    } else {
+      $('corr').textContent = c.toFixed(3);
+      $('corr').style.color = c > 0.4 ? 'var(--accent)'
+                            : c < -0.4 ? 'var(--danger)' : 'var(--text)';
+      $('corr-label').textContent = corrWord(c);
+    }
+    drawPair(bc, ec);
+  } catch (err) {
+    $('upd').textContent = 'Price feed unavailable';
+    $('upd').className = 'ss err';
+  }
+}
+
+async function loadGamma() {
+  try {
+    const j = await fetch('/api/gamma-flip/ETH/surface').then(r=>r.json());
+    if (!j.ok) throw new Error(j.error || 'unavailable');
+    gammaData = j.data;
+    drawGamma(gammaData);
+    $('gamma-note').textContent =
+      gammaData.strikes.length + ' strikes · ' +
+      (gammaData.source || '') + ' · updated ' + new Date().toLocaleTimeString();
+    $('gamma-note').className = 'note';
+  } catch (err) {
+    $('gamma-note').textContent = 'ETH gamma: ' + err.message;
+    $('gamma-note').className = 'note err';
+  }
+}
+
+loadPrices(); loadGamma();
+setInterval(loadPrices, 15000);
+setInterval(loadGamma, 5 * 60000);
+window.addEventListener('resize', () => {
+  if (gammaData) drawGamma(gammaData);
+});
+</script>
+</body>
+</html>

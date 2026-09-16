@@ -56,6 +56,12 @@ HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY", "")
 def index():
     return render_template_string(open("index.html").read())
 
+@app.route("/compare")
+@requires_auth
+def compare():
+    return render_template_string(open("compare.html").read())
+
+
 @app.route("/crypto-movers")
 @requires_auth
 def crypto_movers():
