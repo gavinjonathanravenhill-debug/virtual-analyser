@@ -83,7 +83,8 @@ class Etherscan:
             if isinstance(result, str) and "rate limit" in result.lower():
                 time.sleep(1 + attempt)
                 continue
-            if str(data.get("message", "")).startswith("No transactions"):
+            msg = str(data.get("message", "")).lower()
+            if msg.startswith("no ") and "found" in msg:  # Etherscan/Blockscout "no results"
                 return []
             raise RuntimeError(f"{self.name}: {data.get('message')} - {result}")
         raise RuntimeError(f"{self.name} rate limit")
