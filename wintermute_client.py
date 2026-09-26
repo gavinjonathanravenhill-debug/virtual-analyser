@@ -2,7 +2,7 @@
 Wintermute tracker - data + analysis layer for the /wintermute page.
 
 Sources (all free tiers):
-  Etherscan V2      wallet txs, token transfers, token balances   ETHERSCAN_API_KEY (required)
+  Etherscan V2      wallet txs, token transfers, token balances   ETHERSCAN_API_KEY (optional - falls back to Blockscout, no key)
   CoinGecko         token prices, market caps, price/volume history   COINGECKO_API_KEY (optional demo key)
   GeckoTerminal     current DEX liquidity
   Binance data API  which symbols are already listed (spot)
@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 import requests
 
 ETHERSCAN = "https://api.etherscan.io/v2/api"
+BLOCKSCOUT = "https://eth.blockscout.com/api"  # keyless fallback
 COINGECKO = "https://api.coingecko.com/api/v3"
 GECKOTERMINAL = "https://api.geckoterminal.com/api/v2"
 BINANCE_INFO = "https://data-api.binance.vision/api/v3/exchangeInfo"  # not geo-blocked
@@ -61,16 +62,18 @@ def cached(key, ttl, fn):
 # ------------------------------------------------------------ API clients --
 class Etherscan:
     def __init__(self, api_key=None, chain_id=CHAIN_ID):
+        # No key -> Blockscout's free Etherscan-compatible API (no signup needed)
         self.key = api_key or os.getenv("ETHERSCAN_API_KEY")
-        if not self.key:
-            raise RuntimeError("ETHERSCAN_API_KEY is not set")
+        self.url = ETHERSCAN if self.key else BLOCKSCOUT
+        self.name = "Etherscan" if self.key else "Blockscout"
         self.chain_id = chain_id
         self.s = requests.Session()
 
     def get(self, **params):
-        params.update(chainid=self.chain_id, apikey=self.key)
+        if self.key:
+            params.update(chainid=self.chain_id, apikey=self.key)
         for attempt in range(4):
-            r = self.s.get(ETHERSCAN, params=params, timeout=30)
+            r = self.s.get(self.url, params=params, timeout=30)
             r.raise_for_status()
             data = r.json()
             time.sleep(0.22)  # free tier ~5 req/s
@@ -82,11 +85,13 @@ class Etherscan:
                 continue
             if str(data.get("message", "")).startswith("No transactions"):
                 return []
-            raise RuntimeError(f"Etherscan: {data.get('message')} - {result}")
-        raise RuntimeError("Etherscan rate limit")
+            raise RuntimeError(f"{self.name}: {data.get('message')} - {result}")
+        raise RuntimeError(f"{self.name} rate limit")
 
     def latest_block(self):
-        return int(self.get(module="proxy", action="eth_blockNumber"), 16)
+        if self.key:
+            return int(self.get(module="proxy", action="eth_blockNumber"), 16)
+        return int(self.get(module="block", action="eth_block_number"), 16)
 
 
 class CoinGecko:
