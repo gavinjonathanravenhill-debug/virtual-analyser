@@ -45,6 +45,25 @@ def requires_auth(f):
     return decorated
 
 
+# ---- Wintermute tracker (/wintermute) - whole blueprint behind the site password ----
+from wintermute_routes import wintermute_bp
+from wintermute_realtime import start_realtime
+
+
+@wintermute_bp.before_request
+def _wintermute_auth():
+    auth = request.authorization
+    if not auth or not check_auth(auth.password):
+        return Response("Login required", 401, {"WWW-Authenticate": "Basic realm=\"Virtual Analyser\""})
+
+
+app.register_blueprint(wintermute_bp)
+try:
+    start_realtime()
+except Exception as _e:
+    print(f"wintermute realtime failed to start, continuing: {_e}")
+
+
 @app.route("/healthz")
 def healthz():
     """Unauthenticated - Railway's healthcheck has no credentials."""
