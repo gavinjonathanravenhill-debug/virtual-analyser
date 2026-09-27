@@ -63,6 +63,7 @@
 <header>
   <h1>Wintermute Tracker</h1>
   <a href="/">&larr; Dashboard</a>
+  <a href="/ethereum">Wallet moves: ETH</a> <a href="/solana">SOL</a> <a href="/base">Base</a> <a href="/bsc">BNB</a> <a href="/robinhood">Robinhood</a>
   <span style="cursor:pointer" onclick="document.querySelector('[data-t=live]').click()">
     <span id="hdr-live">connecting…</span> · <span id="hdr-count">0</span> new</span>
   <div class="controls">
@@ -118,7 +119,8 @@
   <section class="tab" id="t-listing"><div class="loading">Loading…</div></section>
   <section class="tab" id="t-live">
     <div class="tiles">
-      <div class="tile"><div class="k">Connection</div><div class="v" id="live-status">Connecting…</div></div>
+      <div class="tile"><div class="k">Connection</div><div class="v" id="live-status">Connecting…</div>
+        <div class="dim" id="live-detail" style="font-size:12px;word-break:break-word"></div></div>
       <div class="tile"><div class="k">Latest block</div><div class="v" id="live-block">–</div>
         <div class="dim" id="live-age"></div></div>
       <div class="tile"><div class="k">Transfers this session</div><div class="v" id="live-count">0</div></div>
@@ -353,6 +355,10 @@ function setStatus(st) {
   $('#live-status').innerHTML = liveDot(s) + s;
   $('#hdr-live').innerHTML = liveDot(s) + (s === 'live' ? 'LIVE' : s);
   if (st.block) $('#live-block').textContent = num(st.block, 0);
+  const detail = [st.mode === 'polling' ? 'HTTP polling' : st.mode === 'websocket' ? 'WebSocket' : st.mode,
+                  st.rpc, st.wallets ? st.wallets + ' wallets' : ''].filter(Boolean).join(' · ');
+  if (detail || st.error) $('#live-detail').innerHTML = (detail ? detail : '') +
+    (st.error ? `<div class="err" style="margin-top:4px">${String(st.error).replace(/</g, '&lt;')}</div>` : '');
   if ('pending' in st) $('#live-pending').innerHTML = st.pending
     ? '<span class="pos">On</span>' : '<span class="dim" title="Set ETH_WSS_URL to an Alchemy WebSocket URL">Off</span>';
 }
@@ -387,19 +393,40 @@ function addTransfer(t, replay) {
   }
 }
 
+let lastMsgAt = 0, fallbackTimer = null;
+const seenLive = new Set();
+function onTransfer(t, replay) {
+  const k = t.hash + t.contract + t.amount + t.status;
+  if (seenLive.has(k)) return;
+  seenLive.add(k);
+  addTransfer(t, replay);
+}
+
+async function pollRecent() {        // used only when the event stream is stalled
+  try {
+    const d = await api('/api/wintermute/stream/recent');
+    setStatus(d.status);
+    d.events.slice().reverse().forEach(t => onTransfer(t, false));
+  } catch (e) { setStatus({state: 'reconnecting', error: e.message}); }
+}
+
 function startLive() {
   if (es) return;
   es = new EventSource('/api/wintermute/stream');
   es.onmessage = e => {
+    lastMsgAt = Date.now();
     const m = JSON.parse(e.data);
     if (m.type === 'status') setStatus(m.data);
     else if (m.type === 'head') { lastHeadAt = Date.now(); setStatus({state: 'live', block: m.data.block}); }
-    else if (m.type === 'transfer') addTransfer(m.data, m.replay);
+    else if (m.type === 'transfer') onTransfer(m.data, m.replay);
   };
-  es.onopen = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
   es.onerror = () => setStatus({state: 'reconnecting'});  // EventSource retries by itself
   setInterval(() => {
     if (lastHeadAt) $('#live-age').textContent = Math.round((Date.now() - lastHeadAt) / 1000) + 's since last block';
+    // no stream message for 25s (proxy buffering / stream blocked) -> poll plain JSON every 5s
+    const stalled = Date.now() - lastMsgAt > 25000;
+    if (stalled && !fallbackTimer) { pollRecent(); fallbackTimer = setInterval(pollRecent, 5000); }
+    if (!stalled && fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null; }
   }, 1000);
 }
 

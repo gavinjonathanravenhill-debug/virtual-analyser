@@ -87,21 +87,26 @@ try:
 except Exception as _e:
     print(f"solana tracker failed to start, continuing: {_e}")
 
-# ---- Robinhood Chain wallet tracker (/robinhood) - same features, behind the site password ----
+# ---- EVM wallet trackers (/ethereum, /base, /bsc, /robinhood) - same page as /solana, behind the password ----
 try:
-    from robinhood_routes import robinhood_bp
+    from evm_routes import EVM_BLUEPRINTS
+    from evm_chains import CHAINS as EVM_CHAINS
 
-    @robinhood_bp.before_request
-    def _robinhood_auth():
+    def _evm_auth():
         auth = request.authorization
         if not auth or not check_auth(auth.password):
             return Response("Login required", 401, {"WWW-Authenticate": "Basic realm=\"Virtual Analyser\""})
 
-    app.register_blueprint(robinhood_bp)
-    from robinhood_client import start_robinhood
-    start_robinhood()
+    for _name, _bp in EVM_BLUEPRINTS.items():
+        _bp.before_request(_evm_auth)
+        app.register_blueprint(_bp)
+    for _name, _m in EVM_CHAINS.items():
+        try:
+            _m.start()
+        except Exception as _e:
+            print(f"{_name} tracker failed to start, continuing: {_e}")
 except Exception as _e:
-    print(f"robinhood tracker failed to start, continuing: {_e}")
+    print(f"EVM trackers failed to load, continuing: {_e}")
 try:
     start_realtime()
 except Exception as _e:

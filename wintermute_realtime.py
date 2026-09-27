@@ -12,6 +12,9 @@ Env:
   ETH_WSS_URL  WebSocket RPC. Default is the free public node (no key, mined only).
                Use wss://eth-mainnet.g.alchemy.com/v2/<KEY> to also get pending txs.
   ETH_HTTP_URL optional HTTP RPC; derived from ETH_WSS_URL when not set.
+
+If the WebSocket won't connect or stops delivering blocks, the watcher drops to polling over
+HTTP JSON-RPC (every ~4s, several public RPCs with failover) and retries the WebSocket later.
 """
 
 import asyncio
@@ -31,6 +34,11 @@ TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 ERC20_TRANSFER_SIG = "0xa9059cbb"
 ERC20_TRANSFER_FROM_SIG = "0x23b872dd"
 DEFAULT_WSS = "wss://ethereum-rpc.publicnode.com"
+PUBLIC_HTTP = ["https://ethereum-rpc.publicnode.com", "https://eth.llamarpc.com", "https://eth.drpc.org",
+               "https://1rpc.io/eth"]
+HEAD_TIMEOUT = 60      # no new block over the WebSocket for this long -> reconnect / fall back
+POLL_EVERY = 4         # seconds between HTTP polls in fallback mode
+POLL_MINUTES = 10      # how long to poll before trying the WebSocket again
 
 WALLETS = {k.lower(): v for k, v in WINTERMUTE_WALLETS.items()}
 
@@ -85,21 +93,38 @@ bus = EventBus()
 class RealtimeWatcher:
     def __init__(self):
         self.wss = os.getenv("ETH_WSS_URL", DEFAULT_WSS)
-        self.http = os.getenv("ETH_HTTP_URL") or (
-            self.wss.replace("wss://", "https://").replace("ws://", "http://"))
+        own = os.getenv("ETH_HTTP_URL") or self.wss.replace("wss://", "https://").replace("ws://", "http://")
+        self.https = [own] + [u for u in PUBLIC_HTTP if u != own]
+        self.http_i = 0
+        self.last_head = 0
         self.alchemy = "alchemy.com" in self.wss
         self.cg = CoinGecko()
         self.s = requests.Session()
         self.seen = deque(maxlen=5000)
         bus.status["provider"] = self.wss.split("/v2/")[0]  # never expose the key
         bus.status["pending"] = self.alchemy
+        bus.status.update(mode="websocket", error=None, wallets=len(WALLETS))
 
     # ---------- helpers ----------
     def rpc(self, method, params):
-        r = self.s.post(self.http, json={"jsonrpc": "2.0", "id": 1, "method": method,
-                                         "params": params}, timeout=20)
-        r.raise_for_status()
-        return r.json().get("result")
+        last = None
+        for attempt in range(len(self.https) * 2):
+            url = self.https[self.http_i % len(self.https)]
+            try:
+                r = self.s.post(url, json={"jsonrpc": "2.0", "id": 1, "method": method,
+                                           "params": params}, timeout=20)
+                if r.status_code == 429 or r.status_code >= 500 or r.status_code in (401, 403):
+                    raise RuntimeError(f"HTTP {r.status_code}")
+                d = r.json()
+                if "error" in d:
+                    raise RuntimeError(str((d["error"] or {}).get("message")))
+                bus.status["rpc"] = url.split("/")[2]
+                return d.get("result")
+            except Exception as e:
+                last = f"{url.split('/')[2]}: {str(e)[:120]}"
+                self.http_i += 1
+                time.sleep(0.5)
+        raise RuntimeError(f"all Ethereum RPCs failed ({last})")
 
     def token_meta(self, contract):
         def fetch():
@@ -177,7 +202,8 @@ class RealtimeWatcher:
 
     def on_head(self, head):
         n = int(head["number"], 16)
-        bus.status.update(state="live", block=n)
+        self.last_head = time.time()
+        bus.status.update(state="live", block=n, error=None)
         bus.publish("head", {"block": n, "ts": int(head.get("timestamp", "0x0"), 16)})
         threading.Thread(target=self.scan_block_eth, args=(n,), daemon=True).start()
 
@@ -228,8 +254,15 @@ class RealtimeWatcher:
             for i, params in enumerate(subs, 1):
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": i,
                                           "method": "eth_subscribe", "params": params}))
-            bus.status.update(state="connecting")
-            async for raw in ws:
+            bus.status.update(state="connecting", mode="websocket")
+            self.last_head = time.time()
+            while True:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=HEAD_TIMEOUT)
+                except asyncio.TimeoutError:
+                    raise RuntimeError(f"WebSocket sent no new block for {HEAD_TIMEOUT}s")
+                if time.time() - self.last_head > HEAD_TIMEOUT:
+                    raise RuntimeError(f"WebSocket sent no new block for {HEAD_TIMEOUT}s")
                 msg = json.loads(raw)
                 if "id" in msg:   # subscription ack
                     if msg.get("result"):
@@ -252,18 +285,64 @@ class RealtimeWatcher:
                 except Exception as e:
                     print(f"[wintermute realtime] handler error: {e}")
 
+    # ---------- HTTP polling fallback ----------
+    def poll_once(self, last):
+        latest = int(self.rpc("eth_blockNumber", []), 16)
+        if last is None:
+            last = latest - 5          # small look-back on first poll
+        if latest <= last:
+            return last
+        frm = max(last + 1, latest - 25)
+        padded = [_pad(w) for w in WALLETS]
+        logs = []
+        for topics in ([TRANSFER_TOPIC, padded], [TRANSFER_TOPIC, None, padded]):
+            logs += self.rpc("eth_getLogs", [{"fromBlock": hex(frm), "toBlock": hex(latest),
+                                              "topics": topics}]) or []
+        for lg in sorted(logs, key=lambda x: (x.get("blockNumber"), x.get("logIndex"))):
+            try:
+                self.on_log(lg)
+            except Exception as e:
+                print(f"[wintermute realtime] log error: {e}")
+        for n in range(max(frm, latest - 4), latest + 1):   # native ETH moves (last few blocks)
+            self.scan_block_eth(n)
+        self.last_head = time.time()
+        bus.status.update(state="live", block=latest, mode="polling", error=None)
+        bus.publish("head", {"block": latest, "ts": int(time.time())})
+        return latest
+
+    def poll_for(self, seconds):
+        bus.status.update(mode="polling", state="connecting")
+        bus.publish("status", dict(bus.status))
+        until, last, fails = time.time() + seconds, None, 0
+        while time.time() < until:
+            try:
+                last = self.poll_once(last)
+                fails = 0
+            except Exception as e:
+                fails += 1
+                bus.status.update(state="reconnecting", error=str(e)[:200])
+                bus.publish("status", dict(bus.status))
+                time.sleep(min(5 * fails, 60))
+                continue
+            time.sleep(POLL_EVERY)
+
     def run_forever(self):
-        backoff = 2
+        ws_fails = 0
         while True:
             try:
+                import websockets  # noqa: F401
                 asyncio.run(self.session())
-                backoff = 2
+                ws_fails = 0
             except Exception as e:
-                bus.status.update(state="reconnecting")
-                bus.publish("status", {"state": "reconnecting", "error": str(e)[:200]})
-                print(f"[wintermute realtime] {e} - reconnecting in {backoff}s")
-                time.sleep(backoff)
-                backoff = min(backoff * 2, 60)
+                ws_fails += 1
+                bus.status.update(state="reconnecting", error=f"WebSocket: {str(e)[:180]}")
+                bus.publish("status", dict(bus.status))
+                print(f"[wintermute realtime] websocket failed ({ws_fails}): {e}")
+                if ws_fails >= 2:
+                    self.poll_for(POLL_MINUTES * 60)   # keep the feed live over HTTP, then retry WS
+                    ws_fails = 0
+                else:
+                    time.sleep(3)
 
 
 _started = False

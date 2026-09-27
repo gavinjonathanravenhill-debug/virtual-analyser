@@ -34,6 +34,8 @@ WINTERMUTE_WALLETS = {
     "0x000002cba8dfb0a86a47a415592835e17fac080a": "Wintermute 2",
     "0x4f3a120e72c76c22ae802d129f599bfdbc31cb81": "Wintermute: Multisig",
     "0xf8191d98ae98d2f7abdfb63a9b0b812b93c873aa": "Wintermute 4",
+    "0x0000006daea1723962647b7e189d311d757fb793": "Wintermute 1 (trading bot)",
+    "0xce84449a8ebec019ac110a4b6662e55d0fd9f228": "Wintermute 5",
 }
 
 # Add more without code changes: Railway variable WINTERMUTE_EXTRA_WALLETS

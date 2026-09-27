@@ -114,7 +114,15 @@ def stream():
 
 @wintermute_bp.route("/api/wintermute/stream/status")
 def stream_status():
+    start_realtime()
     return jsonify(bus.status)
+
+
+@wintermute_bp.route("/api/wintermute/stream/recent")
+def stream_recent():
+    """Plain JSON copy of the live feed - the page falls back to this if the event stream stalls."""
+    start_realtime()
+    return jsonify({"status": bus.status, "events": [m["data"] for m in list(bus.recent)[:100]]})
 
 
 @wintermute_bp.route("/api/wintermute/dex-trades")

@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .env
 signals.db
+_to_delete/

@@ -1,10 +1,12 @@
 """
-Robinhood Chain (chain id 4663, Arbitrum Orbit, gas in ETH) wallet tracker.
+Generic EVM wallet tracker - one engine for Ethereum, Base, BSC and Robinhood Chain.
 
-Data: the official public RPC (ROBINHOOD_RPC_URL to override) - ERC-20 Transfer logs for your
-wallets, polled every ~20s; DexScreener (chain 'robinhood') for price / mcap / liquidity;
-GeckoTerminal for holder concentration. The Blockscout explorer API sits behind a bot check,
-so nothing here depends on it.
+Not imported directly: evm_chains.py loads this file once per chain with a CFG dict
+already in its globals, so every chain gets its own module (own wallets, tracker, caches).
+
+Data: public JSON-RPC (ERC-20 Transfer logs for your wallets, polled every few seconds,
+several RPCs with automatic failover); DexScreener for price / mcap / liquidity;
+GeckoTerminal for holder concentration (via solana_signals.risk_checks).
 """
 
 import json
@@ -16,35 +18,57 @@ from collections import Counter, defaultdict, deque
 
 import requests
 
-RPC_URL = os.getenv("ROBINHOOD_RPC_URL", "https://rpc.mainnet.chain.robinhood.com")
-POLL_SECONDS = int(os.getenv("ROBINHOOD_POLL_SECONDS", "20"))
-RPC_GAP = float(os.getenv("ROBINHOOD_RPC_GAP", "0.06"))
-BLOCK_SECONDS = 0.1                       # measured ~0.1s blocks
-MAX_RANGE = 1_500_000                     # blocks per eth_getLogs (~40h) - tested OK up to 2M
-START_HOURS = float(os.getenv("ROBINHOOD_START_HOURS", "6"))
-TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-QUOTE_SYMBOLS = {"WETH", "ETH", "USDC", "USDT", "USDG", "USDC.E", "DAI", "PYUSD"}
-STABLE_SYMBOLS = {"USDC", "USDT", "USDG", "USDC.E", "DAI", "PYUSD"}
+CFG = globals()["CFG"]                     # injected by evm_chains.load_chain
+_P = CFG["chain"].upper()                  # env prefix, e.g. BASE_RPC_URL
 
-CHAIN = "robinhood"
-NATIVE = "ETH"
-GT_NETWORK = "robinhood"
-BUBBLEMAPS_CHAIN = "robinhood"
-EXPLORER = "https://robinhoodchain.blockscout.com"
+_env_rpcs = [u.strip() for u in os.getenv(f"{_P}_RPC_URL", "").split(",") if u.strip()]
+RPC_URLS = _env_rpcs + [u for u in CFG["rpcs"] if u not in _env_rpcs]
+RPC_URL = RPC_URLS[0]
+POLL_SECONDS = int(os.getenv(f"{_P}_POLL_SECONDS", str(CFG.get("poll", 15))))
+RPC_GAP = float(os.getenv(f"{_P}_RPC_GAP", str(CFG.get("gap", 0.06))))
+BLOCK_SECONDS = CFG["block_seconds"]
+MAX_RANGE = int(os.getenv(f"{_P}_MAX_RANGE", str(CFG.get("max_range", 10_000))))  # shrinks itself if the RPC complains
+START_HOURS = float(os.getenv(f"{_P}_START_HOURS", str(CFG.get("start_hours", 6))))
+TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+STABLE_SYMBOLS = {"USDC", "USDT", "USDG", "USDC.E", "USDBC", "DAI", "PYUSD", "FDUSD", "BUSD", "USDE", "USDS", "USD1"}
+WRAPPED = set(CFG["wrapped"])              # wrapped / native symbols priced at the native coin
+QUOTE_SYMBOLS = STABLE_SYMBOLS | WRAPPED
+
+CHAIN = CFG["chain"]
+NATIVE = CFG["native"]
+NAME = CFG["name"]
+GT_NETWORK = CFG["gt"]
+BUBBLEMAPS_CHAIN = CFG["bubblemaps"]
+DEXSCREENER = CFG["dexscreener"]
+EXPLORER = CFG["explorer"]
 EXPLORER_TX = EXPLORER + "/tx/"
-PAGE = {"chain": "robinhood", "title": "Robinhood Chain Wallets", "native": "ETH", "dexscreener": "robinhood",
-        "bubblemaps": "robinhood", "explorer": EXPLORER, "explorer_name": "Blockscout",
+PAGE = {"chain": CHAIN, "title": f"{NAME} Wallets", "native": NATIVE, "dexscreener": DEXSCREENER,
+        "bubblemaps": BUBBLEMAPS_CHAIN, "explorer": EXPLORER, "explorer_name": CFG["explorer_name"],
         "tx": EXPLORER + "/tx/", "addr": EXPLORER + "/address/", "token": EXPLORER + "/token/",
-        "holders_suffix": "?tab=holders", "portfolio_suffix": "?tab=tokens", "addr_hint": "0x address",
-        "rpc_note": "10-30s"}
+        "holders_suffix": CFG.get("holders_suffix", "#balances"), "portfolio_suffix": CFG.get("portfolio_suffix", ""),
+        "addr_hint": "0x address", "rpc_note": f"{POLL_SECONDS}-{POLL_SECONDS * 2}s"}
 
 _here = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(_here, "robinhood_wallets.json")) as f:
-    _cfg = json.load(f)
-WALLETS = {w["address"].lower(): {**w, "address": w["address"].lower()} for w in _cfg.get("wallets", [])}
-EXCHANGES = {a.lower(): n for a, n in (_cfg.get("exchanges") or {}).items()}
+_wallet_file = os.path.join(_here, f"{CHAIN}_wallets.json")
+try:
+    with open(_wallet_file) as f:
+        _cfg = json.load(f)
+except FileNotFoundError:
+    _cfg = {}
+_wl = _cfg.get("wallets") or []
+if not _wl:
+    _wl = CFG.get("default_wallets", [])
+WALLETS = {w["address"].lower(): {**w, "address": w["address"].lower()} for w in _wl}
+EXCHANGES = {a.lower(): n for a, n in ({**CFG.get("default_exchanges", {}), **(_cfg.get("exchanges") or {})}).items()
+             if not a.startswith("_")}
 FILE_LEVELS = [{**lv, "mint": lv["mint"].lower()} for lv in _cfg.get("levels", [])]
-QUOTES = {}   # token address -> symbol, filled in as WETH/stables are discovered
+# Extra wallets without editing files: BASE_EXTRA_WALLETS="0xabc:Label,0xdef:Label 2"
+for _item in os.getenv(f"{_P}_EXTRA_WALLETS", "").split(","):
+    _a, _, _l = _item.strip().partition(":")
+    if _a.lower().startswith("0x") and len(_a) == 42:
+        WALLETS[_a.lower()] = {"address": _a.lower(), "label": _l.strip() or _a[:6] + "…" + _a[-4:],
+                               "group": "Extra", "note": "", "alert": False}
+QUOTES = {}   # token address -> symbol, filled in as wrapped native / stables are discovered
 
 
 def norm(a):
@@ -60,23 +84,54 @@ _s = requests.Session()
 _rpc_lock = threading.Lock()
 
 
+_rpc_i = [0]
+_RANGE_ERRORS = ("range", "limit", "too many", "exceed", "10000", "too large", "response size", "timeout")
+
+
 def rpc(method, params):
+    """JSON-RPC with retries; rotates to the next RPC in RPC_URLS when one keeps failing."""
     with _rpc_lock:
-        for attempt in range(5):
+        last = None
+        for attempt in range(6):
+            url = RPC_URLS[_rpc_i[0] % len(RPC_URLS)]
             try:
-                r = _s.post(RPC_URL, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, timeout=30)
-            except requests.RequestException:
-                time.sleep(1 + attempt)
+                r = _s.post(url, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, timeout=30)
+            except requests.RequestException as e:
+                last = f"{url.split('/')[2]}: {e.__class__.__name__}"
+                _rpc_i[0] += 1
+                time.sleep(0.5 + attempt)
                 continue
             time.sleep(RPC_GAP)
-            if r.status_code == 429 or r.status_code >= 500:
-                time.sleep(2 + attempt * 2)
+            if r.status_code == 429 or r.status_code >= 500 or r.status_code in (401, 403):
+                last = f"{url.split('/')[2]}: HTTP {r.status_code}"
+                _rpc_i[0] += 1
+                time.sleep(1 + attempt)
                 continue
-            d = r.json()
+            try:
+                d = r.json()
+            except ValueError:
+                last = f"{url.split('/')[2]}: bad response"
+                _rpc_i[0] += 1
+                continue
             if "error" in d:
-                raise RuntimeError(f"Robinhood RPC: {d['error'].get('message')}")
-            return d["result"]
-        raise RuntimeError("Robinhood RPC rate limit")
+                msg = str((d["error"] or {}).get("message"))
+                if method == "eth_getLogs" and any(k in msg.lower() for k in _RANGE_ERRORS):
+                    raise RangeTooBig(msg)
+                raise RuntimeError(f"{NAME} RPC: {msg}")
+            tracker_status_rpc(url)
+            return d.get("result")
+        raise RuntimeError(f"{NAME} RPC unavailable ({last})")
+
+
+class RangeTooBig(RuntimeError):
+    pass
+
+
+def tracker_status_rpc(url):
+    try:
+        tracker.status["rpc"] = url.split("/")[2]
+    except Exception:
+        pass
 
 
 def latest_block():
@@ -147,19 +202,32 @@ def _unpad(t):
     return "0x" + t[-40:].lower()
 
 
+_range = [MAX_RANGE]
+
+
+def _get_logs(topics, start, end):
+    """eth_getLogs over start..end, splitting the range when the RPC says it's too big."""
+    out = []
+    while start <= end:
+        stop = min(end, start + _range[0] - 1)
+        try:
+            out += rpc("eth_getLogs", [{"fromBlock": hex(start), "toBlock": hex(stop), "topics": topics}]) or []
+            start = stop + 1
+        except RangeTooBig:
+            if _range[0] <= 50:
+                raise
+            _range[0] = max(50, _range[0] // 2)
+    return out
+
+
 def logs_for(addresses, frm, to):
     """All ERC-20 Transfer logs to/from any of `addresses` between blocks frm..to."""
     out = []
     addrs = list(addresses)
     for i in range(0, len(addrs), 40):
         pads = [_pad(a) for a in addrs[i:i + 40]]
-        start = frm
-        while start <= to:
-            end = min(to, start + MAX_RANGE)
-            out += rpc("eth_getLogs", [{"fromBlock": hex(start), "toBlock": hex(end), "topics": [TRANSFER, pads]}]) or []
-            out += rpc("eth_getLogs", [{"fromBlock": hex(start), "toBlock": hex(end),
-                                        "topics": [TRANSFER, None, pads]}]) or []
-            start = end + 1
+        out += _get_logs([TRANSFER, pads], frm, to)
+        out += _get_logs([TRANSFER, None, pads], frm, to)
     seen, uniq = set(), []
     for lg in out:
         k = (lg["transactionHash"], lg["logIndex"])
@@ -210,9 +278,9 @@ def parse_logs(logs, wallets):
             if q:
                 ev.update(kind="BUY" if amt > 0 else "SELL", quote=QUOTES[q[0]], quote_amount=abs(q[1]))
             elif amt > 0 and eth_paid > 0:
-                ev.update(kind="BUY", quote="ETH", quote_amount=eth_paid)
+                ev.update(kind="BUY", quote=NATIVE, quote_amount=eth_paid)
             elif amt < 0 and sender == w and cp and cp not in EXCHANGES and cp not in WALLETS and is_contract(cp):
-                ev.update(kind="SELL", quote="ETH", quote_amount=None)   # sold into a pool for native ETH
+                ev.update(kind="SELL", quote=NATIVE, quote_amount=None)   # sold into a pool for native ETH
             elif amt > 0 and sender == w and cp and cp not in EXCHANGES and is_contract(cp):
                 ev.update(kind="BUY", quote=None, quote_amount=None)     # bought from a pool (paid via router)
             else:
@@ -253,7 +321,7 @@ def token_info(mints):
         for p in pairs:
             a = ((p.get("baseToken") or {}).get("address") or "").lower()
             liq = (p.get("liquidity") or {}).get("usd") or 0
-            if a in chunk and p.get("chainId") == "robinhood" and liq >= 1000 and \
+            if a in chunk and p.get("chainId") == DEXSCREENER and liq >= 1000 and \
                     liq > ((best.get(a) or {}).get("liquidity") or {}).get("usd", 0):
                 best[a] = p
         for a in chunk:
@@ -274,14 +342,19 @@ _eth = [0, None]
 
 
 def eth_usd():
+    """USD price of the chain's native coin (ETH, or BNB on BSC)."""
     if time.time() - _eth[0] > 120:
         try:
             _eth[1] = requests.get("https://api.coingecko.com/api/v3/simple/price",
-                                   params={"ids": "ethereum", "vs_currencies": "usd"}, timeout=15).json()["ethereum"]["usd"]
+                                   params={"ids": CFG["coingecko_native"], "vs_currencies": "usd"},
+                                   timeout=15).json()[CFG["coingecko_native"]]["usd"]
             _eth[0] = time.time()
         except Exception:
             pass
     return _eth[1]
+
+
+native_usd = eth_usd
 
 
 def enrich(events):
@@ -325,7 +398,7 @@ class Tracker:
         self.checked = set()
         self.listeners = []
         self.status = {"started": None, "last_poll": None, "last_error": None, "polls": 0,
-                       "rpc": "Robinhood RPC", "block": None}
+                       "rpc": RPC_URL.split("/")[2], "block": None, "range": MAX_RANGE}
         self.lock = threading.Lock()
 
     def poll(self):
@@ -335,6 +408,8 @@ class Tracker:
             self.last_block = latest
             self.status.update(last_poll=int(time.time()), polls=self.status["polls"] + 1, block=latest)
             return []
+        if self.last_block and latest - self.last_block > int(START_HOURS * 3600 / BLOCK_SECONDS):
+            self.last_block = latest - int(START_HOURS * 3600 / BLOCK_SECONDS)   # was down a long time
         frm = (self.last_block + 1) if self.last_block else latest - int(START_HOURS * 3600 / BLOCK_SECONDS)
         # wallets added since the last poll get their own look-back
         fresh = [w for w in wallets if w not in self.checked]
@@ -352,7 +427,7 @@ class Tracker:
                 self.events.appendleft(e)
         self.checked.update(wallets)
         self.last_block = latest
-        self.status.update(last_poll=int(time.time()), polls=self.status["polls"] + 1, block=latest)
+        self.status.update(last_poll=int(time.time()), polls=self.status["polls"] + 1, block=latest, range=_range[0])
         for fn in self.listeners:
             try:
                 fn(evs)
@@ -386,7 +461,7 @@ tracker = Tracker()
 _started = False
 
 
-def start_robinhood():
+def start():
     global _started
     if _started:
         return
@@ -395,9 +470,10 @@ def start_robinhood():
     import solana_signals as sig
     sig.start_signals()
     sig.register(sys.modules[__name__])
-    if os.getenv("ROBINHOOD_TRACKER_OFF"):
+    if os.getenv(f"{_P}_TRACKER_OFF"):
+        tracker.status["last_error"] = f"Tracker switched off ({_P}_TRACKER_OFF is set)"
         return
-    threading.Thread(target=tracker.loop, daemon=True, name="robinhood-tracker").start()
+    threading.Thread(target=tracker.loop, daemon=True, name=f"{CHAIN}-tracker").start()
 
 
 # ------------------------------------------------------- lookup / token ----
@@ -548,7 +624,7 @@ def profile(address, depth=40):
             continue
         ti = info.get(t) or {}
         sym = QUOTES.get(t) or ti.get("symbol") or token_meta(t)["symbol"]
-        price = 1.0 if sym in STABLE_SYMBOLS else (ep if sym in ("WETH", "ETH") else ti.get("price"))
+        price = 1.0 if sym in STABLE_SYMBOLS else (ep if sym in WRAPPED else ti.get("price"))
         rows.append({"mint": t, "symbol": sym, "amount": bal, "price": price, "usd": bal * price if price else None,
                      "market_cap": ti.get("market_cap"), "liquidity": ti.get("liquidity"),
                      "flag": "no market" if not price else "micro-cap" if (ti.get("market_cap") or 1e18) < 1e6 else
@@ -574,10 +650,10 @@ def profile(address, depth=40):
         holdings={"sol": eth, "sol_usd": eth * ep, "tokens": rows, "token_count": len(rows), "total_usd": total,
                   "priced": sum(1 for r in rows if r["usd"])},
         recent=evs[:40],
-        summary=f"Most likely: {what} ({conf} confidence). Holds ~${total:,.0f} (ETH + tokens it traded in the last {hours}h). "
+        summary=f"Most likely: {what} ({conf} confidence). Holds ~${total:,.0f} ({NATIVE} + tokens it traded in the last {hours}h). "
                 f"{len(evs)} token transfers in {hours}h.",
         manipulation=top["manipulation"] if top and top["score"] >= 35 else "No strong manipulation pattern in the scanned activity.",
-        note="Robinhood Chain: scans the last %dh of token transfers via RPC (the explorer API is bot-protected), "
-             "so wallet age and first funder aren't available - open it on Blockscout for full history." % hours)
+        note=f"{NAME}: scans the last {hours}h of token transfers via RPC, so wallet age and first funder "
+             f"aren't available - open it on {CFG['explorer_name']} for full history.")
     _prof[a] = (time.time(), out)
     return out
