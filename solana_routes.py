@@ -2,7 +2,7 @@
 
 from flask import Blueprint, jsonify, render_template, request
 
-from solana_client import VINE_MINT, WALLETS, lookup, start_solana, tracker
+from solana_client import VINE_MINT, WALLETS, lookup, start_solana, token_report, tracker
 
 solana_bp = Blueprint("solana", __name__)
 
@@ -48,3 +48,10 @@ def lookup_route():
     if not 32 <= len(addr) <= 44:
         return jsonify({"error": "Not a Solana address"}), 400
     return _safe(lambda: {"address": addr, "events": lookup(addr)})
+
+
+@solana_bp.route("/api/solana/token/<mint>")
+def token(mint):
+    if not 32 <= len(mint) <= 44:
+        return jsonify({"error": "Not a Solana token address"}), 400
+    return _safe(lambda: token_report(mint))

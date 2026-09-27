@@ -102,6 +102,14 @@ def token_info(mints):
                 "price": float(p["priceUsd"]) if p.get("priceUsd") else None,
                 "market_cap": p.get("marketCap") or p.get("fdv"),
                 "url": p.get("url"),
+                "pair": p.get("pairAddress"),
+                "liquidity": (p.get("liquidity") or {}).get("usd"),
+                "volume_24h": (p.get("volume") or {}).get("h24"),
+                "change_24h": (p.get("priceChange") or {}).get("h24"),
+                "change_1h": (p.get("priceChange") or {}).get("h1"),
+                "dex": p.get("dexId"),
+                "name": (p.get("baseToken") or {}).get("name"),
+                "created": p.get("pairCreatedAt"),
             })
     return {m: _tok[m][1] for m in mints if m in _tok}
 
@@ -185,6 +193,7 @@ def enrich(events):
             continue
         t = info.get(e["mint"], {})
         e["symbol"], e["market_cap"], e["dex_url"] = t.get("symbol"), t.get("market_cap"), t.get("url")
+        e["pair"] = t.get("pair")
         e["is_vine"] = e["mint"] == VINE_MINT
         if e.get("quote"):  # price paid, from the swap itself
             qusd = e["quote_amount"] * (sp or 0) if e["quote"] == "SOL" else e["quote_amount"]
@@ -280,3 +289,24 @@ def lookup(address, limit=25):
         if ev:
             evs.append(ev)
     return enrich(evs)
+
+
+def token_report(mint):
+    """DexScreener stats + what your tracked wallets did in this token."""
+    _tok.pop(mint, None)  # always fresh
+    info = token_info([mint]).get(mint, {})
+    ev = [e for e in tracker.query(limit=3000) if e.get("mint") == mint]
+    per = {}
+    for e in ev:
+        w = per.setdefault(e["wallet"], {"wallet": e["wallet"], "label": e["label"], "group": e["group"],
+                                         "alert": e["alert"], "bought": 0.0, "sold": 0.0,
+                                         "buy_usd": 0.0, "sell_usd": 0.0, "trades": 0, "last": 0})
+        w["trades"] += 1
+        w["last"] = max(w["last"], e["ts"])
+        if e["kind"] in ("BUY", "IN"):
+            w["bought"] += e["amount"]; w["buy_usd"] += e.get("usd") or 0
+        else:
+            w["sold"] += e["amount"]; w["sell_usd"] += e.get("usd") or 0
+    return {"mint": mint, "info": info, "is_vine": mint == VINE_MINT,
+            "wallets": sorted(per.values(), key=lambda w: -(w["buy_usd"] + w["sell_usd"])),
+            "events": ev[:100]}

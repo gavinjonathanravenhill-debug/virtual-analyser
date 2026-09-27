@@ -306,7 +306,9 @@ async function loadDex() {
     el.innerHTML = `
       <div class="card"><h3>By token${d.address ? ' · ' + short(d.address) : ''} (click for price impact)</h3>
       <table><tr><th>Token</th><th>Buys</th><th>Sells</th><th>Bought</th><th>Sold</th><th>Net USD</th><th>Mcap</th></tr>
-      ${d.tokens.map(p => `<tr class="click" onclick="showImpact('${p.contract}')"><td>${p.symbol}</td>
+      ${d.tokens.map(p => `<tr class="click" onclick="showImpact('${p.contract}')"><td>${p.symbol}
+          <a class="tx" target="_blank" onclick="event.stopPropagation()" href="https://dexscreener.com/ethereum/${p.contract}">📈</a>
+          <a class="tx" target="_blank" onclick="event.stopPropagation()" href="https://v2.bubblemaps.io/map?address=${p.contract}&chain=eth">🫧</a></td>
         <td>${p.buys}</td><td>${p.sells}</td><td>${usd(p.buy_usd)}</td><td>${usd(p.sell_usd)}</td>
         <td style="color:${p.net_usd >= 0 ? '#2ecc71' : '#ff5c5c'}">${usd(p.net_usd)}</td><td>${usd(p.market_cap)}</td></tr>`).join('')
         || '<tr><td colspan=7 class="dim">No meme swaps in this window</td></tr>'}

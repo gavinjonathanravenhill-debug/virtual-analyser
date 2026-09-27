@@ -77,7 +77,7 @@
   <a href="/">&larr; Dashboard</a>
   <a href="/wintermute">Wintermute (ETH)</a>
   <span class="dim" id="status">starting…</span>
-  <div class="controls"><button onclick="refresh()">Refresh</button></div>
+  <div class="controls"><button onclick="openToken(VINE)">Screen Vine</button><button onclick="refresh()">Refresh</button></div>
 </header>
 
 <nav id="tabs">
@@ -104,12 +104,27 @@
 
   <section class="tab" id="t-lookup">
     <div class="controls" style="margin:0 0 12px">
+      <input id="tk-addr" placeholder="Paste any Solana token (mint) address to screen it" style="flex:1;min-width:320px">
+      <button onclick="openToken($('#tk-addr').value.trim())">Screen token</button>
+    </div>
+    <div class="controls" style="margin:0 0 12px">
       <input id="lk-addr" placeholder="Paste any Solana wallet address" style="flex:1;min-width:320px">
       <button onclick="runLookup()">Scan last 25 txs</button>
     </div>
     <div class="card"><table id="lk-table"><tr><td class="dim l">Scans any wallet once (not added to tracking). Takes ~20s.</td></tr></table></div>
   </section>
 </main>
+
+<div class="modal" id="modal" onclick="if(event.target===this)closeToken()">
+  <div class="box" style="width:min(1150px,100%)">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <h3 id="tk-title" style="margin:0">Token</h3>
+      <div id="tk-links" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+      <button onclick="closeToken()">Close ✕</button>
+    </div>
+    <div id="tk-body" style="margin-top:12px"></div>
+  </div>
+</div>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -121,7 +136,7 @@ const ago = ts => { if (!ts) return 'never'; const s = Date.now()/1000 - ts; ret
 const short = a => a.slice(0, 4) + '…' + a.slice(-4);
 const chip = g => `<span class="chip g-${(g || 'Other').split(' ')[0]}">${g}</span>`;
 const solscan = (kind, v, text) => `<a class="tx" target="_blank" href="https://solscan.io/${kind}/${v}">${text}</a>`;
-let wallets = [], seenAlerts = null;
+let wallets = [], seenAlerts = null, VINE = '';
 
 async function api(p) { const r = await fetch(p); const d = await r.json(); if (d.error) throw new Error(d.error); return d; }
 
@@ -133,7 +148,7 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
 
 function row(e, showWallet = true) {
   const tok = e.symbol === 'SOL' || !e.mint || e.mint === 'SOL' ? (e.symbol || 'SOL')
-    : `<span class="${e.is_vine ? 'vine' : ''}">${e.symbol || short(e.mint)}</span>`;
+    : `<a href="#" onclick="openToken('${e.mint}');return false" class="tx ${e.is_vine ? 'vine' : ''}">${e.symbol || short(e.mint)} 🔍</a>`;
   const paid = e.quote ? `${amt(e.quote_amount)} ${e.quote}` : '–';
   return `<tr class="${e.alert ? 'alert' : ''}"><td class="l">${time(e.ts)}</td>
     ${showWallet ? `<td class="l">${chip(e.group)} ${e.label}</td>` : ''}
@@ -145,7 +160,7 @@ const head = (w = true) => `<tr><th class="l">Time</th>${w ? '<th class="l">Wall
 
 async function loadWallets() {
   const d = await api('/api/solana/wallets');
-  wallets = d.wallets;
+  wallets = d.wallets; VINE = d.vine_mint;
   const st = d.status;
   $('#status').textContent = st.last_poll ? `last scan ${ago(st.last_poll)} · ${st.polls} scans` + (st.last_error ? ' · ⚠ ' + st.last_error : '') : 'first scan running…';
   const groups = [...new Set(wallets.map(w => w.group))];
@@ -173,6 +188,47 @@ async function loadFeed() {
 }
 function beep() { try { const c = new AudioContext(), o = c.createOscillator(); o.connect(c.destination); o.frequency.value = 880; o.start(); o.stop(c.currentTime + .15); } catch (e) {} }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Solana Wallets'; });
+
+// ---------- token screener ----------
+const btn = (href, text) => `<a href="${href}" target="_blank" style="text-decoration:none"><button>${text}</button></a>`;
+async function openToken(mint) {
+  if (!mint) return;
+  $('#modal').classList.add('on');
+  $('#tk-title').textContent = 'Loading ' + short(mint) + '…';
+  $('#tk-links').innerHTML = btn(`https://v2.bubblemaps.io/map?address=${mint}&chain=solana`, '🫧 Bubblemaps (connected wallets)')
+    + btn(`https://dexscreener.com/solana/${mint}`, '📈 DexScreener')
+    + btn(`https://solscan.io/token/${mint}#holders`, 'Holders (Solscan)');
+  $('#tk-body').innerHTML = '<div class="loading">Screening…</div>';
+  try {
+    const d = await api('/api/solana/token/' + mint);
+    const i = d.info || {};
+    const pct = v => v == null ? '–' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${(+v).toFixed(1)}%</span>`;
+    const age = i.created ? ago(i.created / 1000).replace(' ago', '') : '–';
+    const liqRatio = i.liquidity && i.market_cap ? (i.liquidity / i.market_cap * 100).toFixed(1) + '%' : '–';
+    $('#tk-title').innerHTML = `${i.name || ''} <span class="${d.is_vine ? 'vine' : ''}">${i.symbol || short(mint)}</span> <span class="dim" style="font-size:12px">${short(mint)} · ${i.dex || ''}</span>`;
+    $('#tk-body').innerHTML = `
+      <div class="tiles">
+        <div class="tile"><div class="k">Price</div><div class="v">${px(i.price)}</div><div class="dim">1h ${pct(i.change_1h)} · 24h ${pct(i.change_24h)}</div></div>
+        <div class="tile"><div class="k">Market cap</div><div class="v">${usd(i.market_cap)}</div></div>
+        <div class="tile"><div class="k">Liquidity</div><div class="v">${usd(i.liquidity)}</div><div class="dim">${liqRatio} of mcap</div></div>
+        <div class="tile"><div class="k">24h volume</div><div class="v">${usd(i.volume_24h)}</div></div>
+        <div class="tile"><div class="k">Pool age</div><div class="v">${age}</div></div>
+      </div>
+      ${i.pair ? `<iframe src="https://dexscreener.com/solana/${i.pair}?embed=1&theme=dark&info=0" style="width:100%;height:440px;border:1px solid var(--line);border-radius:8px;background:#000"></iframe>`
+               : '<div class="warn">No DexScreener pool found for this token.</div>'}
+      <div class="card" style="margin-top:14px"><h3>Your tracked wallets in this token</h3>
+        <table><tr><th class="l">Wallet</th><th>Trades</th><th>Bought</th><th>Sold</th><th>Buy USD</th><th>Sell USD</th><th>Last</th><th></th></tr>
+        ${d.wallets.map(w => `<tr class="${w.alert ? 'alert' : ''}"><td class="l">${chip(w.group)} ${w.label}</td><td>${w.trades}</td>
+          <td>${amt(w.bought)}</td><td>${amt(w.sold)}</td><td>${usd(w.buy_usd)}</td><td>${usd(w.sell_usd)}</td><td>${ago(w.last)}</td>
+          <td>${solscan('account', w.wallet, 'wallet ↗')}</td></tr>`).join('')
+          || '<tr><td colspan=8 class="dim l">None of your tracked wallets have traded it since the server started</td></tr>'}
+        </table></div>
+      <div class="note">Bubblemaps shows the top holders as bubbles and draws links between wallets that have sent tokens to each other — clusters mean one person/team behind many wallets.
+        Check whether any of your labelled addresses sit inside a cluster.</div>`;
+  } catch (e) { $('#tk-body').innerHTML = `<div class="err">Error: ${e.message}</div>`; }
+}
+function closeToken() { $('#modal').classList.remove('on'); $('#tk-body').innerHTML = ''; }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeToken(); });
 
 async function runLookup() {
   const a = $('#lk-addr').value.trim();
