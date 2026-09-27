@@ -198,7 +198,7 @@ async function loadWallets() {
   const d = await api('/api/solana/wallets');
   wallets = d.wallets; VINE = d.vine_mint;
   const st = d.status;
-  $('#status').textContent = st.last_poll ? `last scan ${ago(st.last_poll)} · ${st.polls} scans` + (st.last_error ? ' · ⚠ ' + st.last_error : '') : 'first scan running…';
+  $('#status').textContent = st.last_poll ? `${st.rpc || ''} · last scan ${ago(st.last_poll)} · ${st.polls} scans` + (st.last_error ? ' · ⚠ ' + st.last_error : '') : 'first scan running…';
   const groups = [...new Set(wallets.map(w => w.group))];
   const g = $('#f-group').value, w = $('#f-wallet').value;
   $('#f-group').innerHTML = '<option value="">All groups</option>' + groups.map(x => `<option ${x === g ? 'selected' : ''}>${x}</option>`).join('');

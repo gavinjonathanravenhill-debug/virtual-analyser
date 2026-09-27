@@ -14,10 +14,14 @@ from collections import deque
 
 import requests
 
-RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
-POLL_SECONDS = int(os.getenv("SOLANA_POLL_SECONDS", "180"))
-SIGS_PER_POLL = int(os.getenv("SOLANA_SIGS_PER_POLL", "15"))
-RPC_GAP = float(os.getenv("SOLANA_RPC_GAP", "0.35"))  # public RPC is rate limited
+_HELIUS = os.getenv("HELIUS_API_KEY", "").strip()
+RPC_URL = os.getenv("SOLANA_RPC_URL") or (
+    f"https://mainnet.helius-rpc.com/?api-key={_HELIUS}" if _HELIUS else "https://api.mainnet-beta.solana.com")
+RPC_NAME = "Helius" if "helius" in RPC_URL else "public Solana RPC"
+# Helius free tier ~10 req/s; the public RPC needs a much bigger gap
+POLL_SECONDS = int(os.getenv("SOLANA_POLL_SECONDS", "60" if _HELIUS else "180"))
+SIGS_PER_POLL = int(os.getenv("SOLANA_SIGS_PER_POLL", "25" if _HELIUS else "15"))
+RPC_GAP = float(os.getenv("SOLANA_RPC_GAP", "0.12" if _HELIUS else "0.35"))
 
 WSOL = "So11111111111111111111111111111111111111112"
 QUOTES = {
@@ -60,7 +64,7 @@ def rpc(method, params):
             if "error" in d:
                 raise RuntimeError(f"Solana RPC: {d['error'].get('message')}")
             return d["result"]
-        raise RuntimeError("Solana RPC rate limit - set SOLANA_RPC_URL to a private endpoint")
+        raise RuntimeError(f"Solana RPC rate limit ({RPC_NAME})")
 
 
 def signatures(address, limit=SIGS_PER_POLL, until=None):
@@ -237,7 +241,7 @@ class Tracker:
         self.last_tx = {}       # wallet -> blockTime of newest tx (any kind)
         self.checked = set()    # wallets scanned at least once
         self.listeners = []     # callbacks(new_events) - e.g. signal journal / alerts
-        self.status = {"started": None, "last_poll": None, "last_error": None, "polls": 0}
+        self.status = {"started": None, "last_poll": None, "last_error": None, "polls": 0, "rpc": RPC_NAME}
         self.lock = threading.Lock()
 
     def poll_wallet(self, addr, limit=SIGS_PER_POLL):
