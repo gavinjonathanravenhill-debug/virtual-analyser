@@ -2,35 +2,225 @@
   "_note": "Your Vine wallet map. alert=true highlights moves at the top of the page. Edit freely; redeploy to apply.",
   "vine_mint": "6AJcP7wuLwmRYLBNbi825wgguaPsWzPBEHcHndpRpump",
   "wallets": [
-    {"address": "MfDuWeqSHEqTFVYZ7LoexgAK9dxk7cy4DFJWjWMGVWa", "label": "Wintermute (13:10 7/8/25)", "group": "Wintermute", "note": "Goes up to 0.069-0.071 then dumps", "alert": true},
-    {"address": "7VWUBYWg5uJ3YDRSVC7WPpaRLxhMVkVXkwkTpxmVkbow", "label": "EXIT address for Wintermute", "group": "Wintermute", "note": "Funded from AaZkwh...5hjy; 1M", "alert": true},
-    {"address": "6vkALAPqURJziEHa3Ame1ua7scekGcCC2UGni2beg7pV", "label": "Buys Vine via Wintermute", "group": "Wintermute", "note": "", "alert": true},
-    {"address": "AaZkwhkiDStDcgrU37XAj9fpNLrD8Erz5PNkdm4k5hjy", "label": "Funder of exit address", "group": "Wintermute", "note": "", "alert": true},
-    {"address": "BMnT51N4iSNhWU5PyFFgWwFvN1jgaiiDr9ZHgnkm3iLJ", "label": "Market maker Vine TXs", "group": "Market maker", "note": "Pumped up hard 8/8 14:08; linked to exit address", "alert": true},
-    {"address": "ANy2CHv5mGoLUa6uB6jG56iC9ovpQG53c1xdNgZML6JU", "label": "MM funder", "group": "Market maker", "note": "Funded market maker", "alert": false},
-    {"address": "4zwzGJrhtev1CBkKjVKjE7sbgMmjGgN13YC5QZqPvtn8", "label": "MM sends to (1)", "group": "Market maker", "note": "", "alert": false},
-    {"address": "DPQkRgMqcGjDyJZfcrMAXTAc56dhtbLB1srsYBz6Bcmg", "label": "MM sends to (2)", "group": "Market maker", "note": "Big", "alert": false},
-    {"address": "BGLSDzFoszB7E3NJhU7qKQ4bgyMfTbo4YA2mRcEeqazy", "label": "Spike person Vine", "group": "Market maker", "note": "160K; linked to market maker", "alert": true},
-    {"address": "AasQTQH9oroodW5vi3uEoDuLyJDVfMz7GWehvisdGmDX", "label": "Liquidity bot / MEV", "group": "Bots", "note": "Max 0.7292", "alert": false},
-    {"address": "4GQeEya6ZTwvXre4Br6ZfDyfe2WQMkcDz2QbkJZazVqS", "label": "Liquidity bot / MEV", "group": "Bots", "note": "Selling at 14.17", "alert": false},
-    {"address": "CujGG3HXK7kPP8D4cFPJHqK4z6tMgMEC1ZaBm3p11WuL", "label": "Liquidity bot", "group": "Bots", "note": "", "alert": false},
-    {"address": "7rhxnLV8C77o6d8oz26AgK8x8m5ePsdeRawjqvojbjnQ", "label": "MEV bot", "group": "Bots", "note": "Flash sells 10K then buys 8K", "alert": false},
-    {"address": "9PHm2cYU8DhwBrbRsqqAjhW9uXVrNR1RaLsvo9oGVeaq", "label": "Token bot", "group": "Bots", "note": "Investigate", "alert": false},
-    {"address": "JD25qVdtd65FoiXNmR89JjmoJdYk9sjYQeSTZAALFiMy", "label": "Jupiter DCA bot", "group": "Bots", "note": "", "alert": false},
-    {"address": "CEEXTqHaqbVriXoW4uvdaPShkMaHg9AWnFXLS1nS887C", "label": "Token bot", "group": "Bots", "note": "Short wash selling", "alert": false},
-    {"address": "Hq8MmCBFavX2GooSCk9XFp4Whue3wmC3jaZqk1zDgSXx", "label": "New bot?", "group": "Bots", "note": "", "alert": false},
-    {"address": "Eo8ttYZZeBqHP7fmBdMgbquPJ4SP4WSY2755QT9Z7pqX", "label": "MEV bot / Vine whale", "group": "Whales", "note": "165K", "alert": false},
-    {"address": "GCvHhEUYQwTJ8jyf8Lc4bv8jBXyZU4LMMsZCobwEPzvM", "label": "Vine whale", "group": "Whales", "note": "10x his stash; holds many others", "alert": false},
-    {"address": "GDcigq7XwGtLQSFzn1PMuzK8MKXmC6C1qLh45zcTu7p3", "label": "Vine whale", "group": "Whales", "note": "200K", "alert": false},
-    {"address": "AcoV2paK3bfZHCGmpPNbb7dK16xZ8cjSujUZqLWtibZ7", "label": "Vine whale", "group": "Whales", "note": "220K", "alert": false},
-    {"address": "7XEJBeKAfyMiDk4Zvx1331jTSCJusz2yUL8MW5EiDCNU", "label": "Vine whale who pumped", "group": "Whales", "note": "", "alert": false},
-    {"address": "D1Ln9N2kiqzdH5y5b5DeSWpV7H1NXFRVLS31ZXRgRdav", "label": "Clever Dolphin", "group": "Clever Dolphin", "note": "", "alert": false},
-    {"address": "QXXTHm7Esekj9a9yBqAJHL9HpB1vyaLHe9za6Ditwux", "label": "Clever Dolphin / holder", "group": "Clever Dolphin", "note": "", "alert": false},
-    {"address": "7xpMuuPVZX1zPJaUR3JESP1CTc3tUwi6WQzALDpY7bbB", "label": "Clever Dolphin Fartboy & Fart Girl", "group": "Clever Dolphin", "note": "Knows a lot", "alert": false},
-    {"address": "5q3g19Ct3pRypgtNSU7Eoib2NNGxCMEySez5TRrYVpZR", "label": "Raydium address", "group": "Other", "note": "", "alert": false},
-    {"address": "3ACp4T3ptTdayzWryEhT65NKZSKLjwXviBjWEy54aFdW", "label": "Unlabelled 54aFdW", "group": "Other", "note": "", "alert": false},
-    {"address": "C6GA4fZDTrxzqRh16F1XbGvYqodmgWT1JHCKHvKVnv8j", "label": "Investigate", "group": "Other", "note": "", "alert": false},
-    {"address": "DAURxR55TUqjqwJJdG3so1rXAYE5sygSdDE7qrxMNA7R", "label": "Investigate", "group": "Other", "note": "", "alert": false},
-    {"address": "7rqskAg1eYHXwL4FFdmgNuJ6rg4jCDfE29ugeeTrKez", "label": "Misc??", "group": "Other", "note": "No income inside wallet of Vine; 6K", "alert": false}
-  ]
+    {
+      "address": "MfDuWeqSHEqTFVYZ7LoexgAK9dxk7cy4DFJWjWMGVWa",
+      "label": "Wintermute (13:10 7/8/25)",
+      "group": "Wintermute",
+      "note": "Goes up to 0.069-0.071 then dumps",
+      "alert": true
+    },
+    {
+      "address": "7VWUBYWg5uJ3YDRSVC7WPpaRLxhMVkVXkwkTpxmVkbow",
+      "label": "EXIT address for Wintermute",
+      "group": "Wintermute",
+      "note": "Funded from AaZkwh...5hjy; 1M",
+      "alert": true
+    },
+    {
+      "address": "6vkALAPqURJziEHa3Ame1ua7scekGcCC2UGni2beg7pV",
+      "label": "Buys Vine via Wintermute",
+      "group": "Wintermute",
+      "note": "",
+      "alert": true
+    },
+    {
+      "address": "AaZkwhkiDStDcgrU37XAj9fpNLrD8Erz5PNkdm4k5hjy",
+      "label": "Funder of exit address",
+      "group": "Wintermute",
+      "note": "",
+      "alert": true
+    },
+    {
+      "address": "BMnT51N4iSNhWU5PyFFgWwFvN1jgaiiDr9ZHgnkm3iLJ",
+      "label": "Market maker Vine TXs",
+      "group": "Market maker",
+      "note": "Pumped up hard 8/8 14:08; linked to exit address",
+      "alert": true
+    },
+    {
+      "address": "ANy2CHv5mGoLUa6uB6jG56iC9ovpQG53c1xdNgZML6JU",
+      "label": "MM funder",
+      "group": "Market maker",
+      "note": "Funded market maker",
+      "alert": false
+    },
+    {
+      "address": "4zwzGJrhtev1CBkKjVKjE7sbgMmjGgN13YC5QZqPvtn8",
+      "label": "MM sends to (1)",
+      "group": "Market maker",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "DPQkRgMqcGjDyJZfcrMAXTAc56dhtbLB1srsYBz6Bcmg",
+      "label": "MM sends to (2)",
+      "group": "Market maker",
+      "note": "Big",
+      "alert": false
+    },
+    {
+      "address": "BGLSDzFoszB7E3NJhU7qKQ4bgyMfTbo4YA2mRcEeqazy",
+      "label": "Spike person Vine",
+      "group": "Market maker",
+      "note": "160K; linked to market maker",
+      "alert": true
+    },
+    {
+      "address": "AasQTQH9oroodW5vi3uEoDuLyJDVfMz7GWehvisdGmDX",
+      "label": "Liquidity bot / MEV",
+      "group": "Bots",
+      "note": "Max 0.7292",
+      "alert": false
+    },
+    {
+      "address": "4GQeEya6ZTwvXre4Br6ZfDyfe2WQMkcDz2QbkJZazVqS",
+      "label": "Liquidity bot / MEV",
+      "group": "Bots",
+      "note": "Selling at 14.17",
+      "alert": false
+    },
+    {
+      "address": "CujGG3HXK7kPP8D4cFPJHqK4z6tMgMEC1ZaBm3p11WuL",
+      "label": "Liquidity bot",
+      "group": "Bots",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "7rhxnLV8C77o6d8oz26AgK8x8m5ePsdeRawjqvojbjnQ",
+      "label": "MEV bot",
+      "group": "Bots",
+      "note": "Flash sells 10K then buys 8K",
+      "alert": false
+    },
+    {
+      "address": "9PHm2cYU8DhwBrbRsqqAjhW9uXVrNR1RaLsvo9oGVeaq",
+      "label": "Token bot",
+      "group": "Bots",
+      "note": "Investigate",
+      "alert": false
+    },
+    {
+      "address": "JD25qVdtd65FoiXNmR89JjmoJdYk9sjYQeSTZAALFiMy",
+      "label": "Jupiter DCA bot",
+      "group": "Bots",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "CEEXTqHaqbVriXoW4uvdaPShkMaHg9AWnFXLS1nS887C",
+      "label": "Token bot",
+      "group": "Bots",
+      "note": "Short wash selling",
+      "alert": false
+    },
+    {
+      "address": "Hq8MmCBFavX2GooSCk9XFp4Whue3wmC3jaZqk1zDgSXx",
+      "label": "New bot?",
+      "group": "Bots",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "Eo8ttYZZeBqHP7fmBdMgbquPJ4SP4WSY2755QT9Z7pqX",
+      "label": "MEV bot / Vine whale",
+      "group": "Whales",
+      "note": "165K",
+      "alert": false
+    },
+    {
+      "address": "GCvHhEUYQwTJ8jyf8Lc4bv8jBXyZU4LMMsZCobwEPzvM",
+      "label": "Vine whale",
+      "group": "Whales",
+      "note": "10x his stash; holds many others",
+      "alert": false
+    },
+    {
+      "address": "GDcigq7XwGtLQSFzn1PMuzK8MKXmC6C1qLh45zcTu7p3",
+      "label": "Vine whale",
+      "group": "Whales",
+      "note": "200K",
+      "alert": false
+    },
+    {
+      "address": "AcoV2paK3bfZHCGmpPNbb7dK16xZ8cjSujUZqLWtibZ7",
+      "label": "Vine whale",
+      "group": "Whales",
+      "note": "220K",
+      "alert": false
+    },
+    {
+      "address": "7XEJBeKAfyMiDk4Zvx1331jTSCJusz2yUL8MW5EiDCNU",
+      "label": "Vine whale who pumped",
+      "group": "Whales",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "D1Ln9N2kiqzdH5y5b5DeSWpV7H1NXFRVLS31ZXRgRdav",
+      "label": "Clever Dolphin",
+      "group": "Clever Dolphin",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "QXXTHm7Esekj9a9yBqAJHL9HpB1vyaLHe9za6Ditwux",
+      "label": "Clever Dolphin / holder",
+      "group": "Clever Dolphin",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "7xpMuuPVZX1zPJaUR3JESP1CTc3tUwi6WQzALDpY7bbB",
+      "label": "Clever Dolphin Fartboy & Fart Girl",
+      "group": "Clever Dolphin",
+      "note": "Knows a lot",
+      "alert": false
+    },
+    {
+      "address": "5q3g19Ct3pRypgtNSU7Eoib2NNGxCMEySez5TRrYVpZR",
+      "label": "Raydium address",
+      "group": "Other",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "3ACp4T3ptTdayzWryEhT65NKZSKLjwXviBjWEy54aFdW",
+      "label": "Unlabelled 54aFdW",
+      "group": "Other",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "C6GA4fZDTrxzqRh16F1XbGvYqodmgWT1JHCKHvKVnv8j",
+      "label": "Investigate",
+      "group": "Other",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "DAURxR55TUqjqwJJdG3so1rXAYE5sygSdDE7qrxMNA7R",
+      "label": "Investigate",
+      "group": "Other",
+      "note": "",
+      "alert": false
+    },
+    {
+      "address": "7rqskAg1eYHXwL4FFdmgNuJ6rg4jCDfE29ugeeTrKez",
+      "label": "Misc??",
+      "group": "Other",
+      "note": "No income inside wallet of Vine; 6K",
+      "alert": false
+    }
+  ],
+  "levels": [
+    {
+      "mint": "6AJcP7wuLwmRYLBNbi825wgguaPsWzPBEHcHndpRpump",
+      "name": "Wintermute dump zone",
+      "low": 0.069,
+      "high": 0.071,
+      "note": "Wintermute wallet historically pushed to 0.069-0.071 then sold"
+    }
+  ],
+  "_levels_note": "Price zones you care about. Alerts fire when price is inside low-high. Add as many as you like."
 }

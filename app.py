@@ -73,6 +73,8 @@ def _solana_auth():
 app.register_blueprint(solana_bp)
 try:
     from solana_client import start_solana
+    from solana_signals import start_signals
+    start_signals()  # register the journal listener before the first poll
     start_solana()
 except Exception as _e:
     print(f"solana tracker failed to start, continuing: {_e}")

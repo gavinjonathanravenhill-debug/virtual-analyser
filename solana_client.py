@@ -92,15 +92,17 @@ def token_info(mints):
         best = {}
         for p in pairs:
             m = (p.get("baseToken") or {}).get("address")
-            if m in chunk and (p.get("liquidity") or {}).get("usd", 0) >= \
-                    ((best.get(m) or {}).get("liquidity") or {}).get("usd", -1):
+            liq = (p.get("liquidity") or {}).get("usd") or 0
+            if m not in chunk or p.get("chainId") != "solana" or liq < 1000:
+                continue  # junk / wrong-chain pools give absurd prices and market caps
+            if liq > ((best.get(m) or {}).get("liquidity") or {}).get("usd", 0):
                 best[m] = p
         for m in chunk:
             p = best.get(m) or {}
             _tok[m] = (time.time(), {
                 "symbol": (p.get("baseToken") or {}).get("symbol") or m[:4] + "…",
                 "price": float(p["priceUsd"]) if p.get("priceUsd") else None,
-                "market_cap": p.get("marketCap") or p.get("fdv"),
+                "market_cap": _sane_mcap(p.get("marketCap") or p.get("fdv")),
                 "url": p.get("url"),
                 "pair": p.get("pairAddress"),
                 "liquidity": (p.get("liquidity") or {}).get("usd"),
@@ -112,6 +114,14 @@ def token_info(mints):
                 "created": p.get("pairCreatedAt"),
             })
     return {m: _tok[m][1] for m in mints if m in _tok}
+
+
+def _sane_mcap(v):
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if 0 < v < 2e12 else None  # nothing on Solana is worth $2T
 
 
 _sol = [0, None]
@@ -213,6 +223,7 @@ class Tracker:
         self.last_sig = {}      # wallet -> newest signature seen
         self.last_tx = {}       # wallet -> blockTime of newest tx (any kind)
         self.checked = set()    # wallets scanned at least once
+        self.listeners = []     # callbacks(new_events) - e.g. signal journal / alerts
         self.status = {"started": None, "last_poll": None, "last_error": None, "polls": 0}
         self.lock = threading.Lock()
 
@@ -246,6 +257,11 @@ class Tracker:
             for e in sorted(new, key=lambda e: e["ts"]):
                 self.events.appendleft(e)
         self.status.update(last_poll=int(time.time()), polls=self.status["polls"] + 1)
+        for fn in self.listeners:
+            try:
+                fn(new)
+            except Exception as e:
+                self.status["last_error"] = f"listener: {e}"
         return new
 
     def loop(self):
