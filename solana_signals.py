@@ -221,33 +221,88 @@ _risk = {}
 
 def risk_checks(mint):
     hit = _risk.get(mint)
-    if hit and time.time() - hit[0] < 900:
+    if hit and time.time() - hit[0] < (60 if any(c["status"] == "unknown" for c in hit[1]["checks"]) else 900):
         return hit[1]
     checks = []
 
     def add(name, status, detail):
         checks.append({"name": name, "status": status, "detail": detail})
 
-    try:
-        acc = sc.rpc("getAccountInfo", [mint, {"encoding": "jsonParsed"}])
-        parsed = (((acc or {}).get("value") or {}).get("data") or {}).get("parsed", {}).get("info", {})
-        ma, fa = parsed.get("mintAuthority"), parsed.get("freezeAuthority")
+    gt = geckoterminal_info(mint)
+    holders = gt.get("holders") or {}
+    dist = holders.get("distribution_percentage") or {}
+    top10 = dist.get("top_10")
+    have_auth = "mint_authority" in gt and "freeze_authority" in gt
+    if have_auth:
+        ma, fa = gt.get("mint_authority"), gt.get("freeze_authority")
+        ma = None if str(ma).lower() in ("no", "none", "null", "false", "") else ma
+        fa = None if str(fa).lower() in ("no", "none", "null", "false", "") else fa
         add("Mint authority", "bad" if ma else "ok",
             "Can still mint more supply" if ma else "Revoked - supply is fixed")
         add("Freeze authority", "bad" if fa else "ok",
             "Can freeze your tokens (honeypot risk)" if fa else "Revoked")
-    except Exception as e:
-        add("Authorities", "unknown", str(e))
-    try:
-        supply = float(sc.rpc("getTokenSupply", [mint])["value"]["uiAmount"] or 0)
-        largest = sc.rpc("getTokenLargestAccounts", [mint])["value"]
-        top = [float(a.get("uiAmount") or 0) for a in largest[:10]]
-        pct = sum(top) / supply * 100 if supply else 0
-        top1 = top[0] / supply * 100 if supply and top else 0
+    if top10 is not None:
+        pct = float(top10)
         add("Top 10 holders", "bad" if pct > 50 else "warn" if pct > 30 else "ok",
-            f"{pct:.1f}% of supply (largest {top1:.1f}% - often the pool, check Bubblemaps)")
-    except Exception as e:
-        add("Holder concentration", "unknown", str(e))
+            f"{pct:.1f}% of supply" + (f" · {int(holders['count']):,} holders" if holders.get("count") else "")
+            + " (source: GeckoTerminal)")
+    if have_auth and top10 is not None:
+        pass  # everything came from GeckoTerminal - no RPC needed
+    else:
+        _rpc_checks(mint, add, need_auth=not have_auth, need_holders=top10 is None)
+    _market_checks(mint, add)
+    score = sum({"ok": 0, "warn": 1, "bad": 3, "unknown": 0}[c["status"]] for c in checks)
+    verdict = "HIGH RISK" if score >= 5 else "CAUTION" if score >= 2 else "OK"
+    if any(c["status"] == "unknown" for c in checks):
+        verdict += " (incomplete)"
+    res = {"checks": checks, "verdict": verdict}
+    _risk[mint] = (time.time(), res)
+    return res
+
+
+def geckoterminal_info(mint):
+    """Free, keyless: holders count/top-10 %, mint & freeze authority (beta, not every token)."""
+    try:
+        r = sc.requests.get(f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{mint}/info",
+                            headers={"accept": "application/json"}, timeout=15)
+        if r.ok:
+            return (r.json().get("data") or {}).get("attributes") or {}
+    except Exception:
+        pass
+    return {}
+
+
+def _rpc_checks(mint, add, need_auth=True, need_holders=True):
+    if need_auth:
+        try:
+            acc = sc.rpc("getAccountInfo", [mint, {"encoding": "jsonParsed"}])
+            parsed = (((acc or {}).get("value") or {}).get("data") or {}).get("parsed", {}).get("info", {})
+            ma, fa = parsed.get("mintAuthority"), parsed.get("freezeAuthority")
+            add("Mint authority", "bad" if ma else "ok",
+                "Can still mint more supply" if ma else "Revoked - supply is fixed")
+            add("Freeze authority", "bad" if fa else "ok",
+                "Can freeze your tokens (honeypot risk)" if fa else "Revoked")
+        except Exception as e:
+            add("Authorities", "unknown", _nice(e))
+    if need_holders:
+        try:
+            supply = float(sc.rpc("getTokenSupply", [mint])["value"]["uiAmount"] or 0)
+            largest = sc.rpc("getTokenLargestAccounts", [mint])["value"]
+            top = [float(a.get("uiAmount") or 0) for a in largest[:10]]
+            pct = sum(top) / supply * 100 if supply else 0
+            top1 = top[0] / supply * 100 if supply and top else 0
+            add("Top 10 holders", "bad" if pct > 50 else "warn" if pct > 30 else "ok",
+                f"{pct:.1f}% of supply (largest {top1:.1f}% - often the pool, check Bubblemaps)")
+        except Exception as e:
+            add("Holder concentration", "unknown", _nice(e) + " - use the Bubblemaps / Holders buttons above")
+
+
+def _nice(e):
+    m = str(e)
+    return "Free Solana RPC is busy" if "rate limit" in m.lower() or "429" in m else m[:120]
+
+
+def _market_checks(mint, add):
     t = sc.token_info([mint]).get(mint) or {}
     liq, mc = t.get("liquidity"), t.get("market_cap")
     if liq and mc:
@@ -264,10 +319,6 @@ def risk_checks(mint):
         v = t["volume_24h"] / liq
         add("Volume vs liquidity", "warn" if v > 20 else "ok",
             f"{v:.1f}x in 24h{' - possible wash trading' if v > 20 else ''}")
-    score = sum({"ok": 0, "warn": 1, "bad": 3, "unknown": 1}[c["status"]] for c in checks)
-    res = {"checks": checks, "verdict": "HIGH RISK" if score >= 5 else "CAUTION" if score >= 2 else "OK"}
-    _risk[mint] = (time.time(), res)
-    return res
 
 
 # ----------------------------------------------------------------- loop ----

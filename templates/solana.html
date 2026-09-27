@@ -353,7 +353,7 @@ async function openToken(mint) {
         <div class="tile"><div class="k">24h volume</div><div class="v">${usd(i.volume_24h)}</div></div>
         <div class="tile"><div class="k">Pool age</div><div class="v">${age}</div></div>
       </div>
-      ${d.risk ? `<div class="card"><h3>Risk checks · <span class="${d.risk.verdict === 'OK' ? 'pos' : d.risk.verdict === 'CAUTION' ? '' : 'neg'}" style="${d.risk.verdict === 'CAUTION' ? 'color:var(--amber)' : ''}">${d.risk.verdict}</span></h3>
+      ${d.risk ? `<div class="card"><h3>Risk checks · <span class="${d.risk.verdict.startsWith('OK') ? 'pos' : d.risk.verdict.startsWith('CAUTION') ? '' : 'neg'}" style="${d.risk.verdict.startsWith('CAUTION') ? 'color:var(--amber)' : ''}">${d.risk.verdict}</span></h3>
         <table>${d.risk.checks.map(c => `<tr><td class="l">${RISK_ICON[c.status]} ${c.name}</td><td class="l dim">${c.detail}</td></tr>`).join('')}</table></div>` : ''}
       ${(d.levels || []).map(l => `<div class="${l.inside ? 'warn' : 'note'}">🎯 Your zone "${l.name}": ${l.low}–${l.high} · now ${px(l.price)} ${l.inside ? '<b>- IN ZONE</b>' : ''}</div>`).join('')}
       ${i.pair ? `<iframe src="https://dexscreener.com/solana/${i.pair}?embed=1&theme=dark&info=0" style="width:100%;height:440px;border:1px solid var(--line);border-radius:8px;background:#000"></iframe>`
@@ -389,6 +389,85 @@ async function refresh() {
 }
 refresh();
 setInterval(refresh, 60000);
+</script>
+<script>
+// ---------- click any column header to sort (▼ high→low / newest first, ▲ low→high) ----------
+(function () {
+  const state = {};  // tableKey -> {col, dir}
+  const MON = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  function val(td) {
+    if (!td) return null;
+    const t = td.innerText.trim();
+    if (!t || t === '–' || t === '-' || /^never$/i.test(t) || /scanning/i.test(t)) return null;
+    let m = t.match(/^(\d+)(m|h|d) ago$/);                     // "12m ago" -> newer = bigger
+    if (m) return -(+m[1]) * {m: 60, h: 3600, d: 86400}[m[2]];
+    m = t.match(/^([A-Z][a-z]{2}) (\d{1,2}), (\d{1,2}):(\d{2})\s*(AM|PM)?/i);  // "Sep 27, 01:40 PM"
+    if (m && MON[m[1].toLowerCase()] !== undefined) {
+      let h = +m[3] % 12 + (/pm/i.test(m[5] || '') ? 12 : 0);
+      if (!m[5]) h = +m[3];
+      return new Date(new Date().getFullYear(), MON[m[1].toLowerCase()], +m[2], h, +m[4]).getTime() / 1000;
+    }
+    m = t.replace(/,/g, '').match(/^[+\-−]?\$?([+\-−]?\d*\.?\d+(?:e[+\-]?\d+)?)\s*([kKMBT])?/);
+    if (m) {
+      const neg = /^[\-−]|^\$?[\-−]/.test(t) ? -1 : 1;
+      return neg * Math.abs(parseFloat(m[1])) * ({k: 1e3, K: 1e3, M: 1e6, B: 1e9, T: 1e12}[m[2]] || 1);
+    }
+    return t.toLowerCase();
+  }
+  function keyOf(table) {
+    const card = table.closest('.card, section, .box');
+    const h = card && card.querySelector('h3');
+    return (table.id || '') + '|' + (h ? h.innerText.replace(/[▲▼↕]/g, '').trim().slice(0, 40) : '') +
+      '|' + [...(table.rows[0] || {cells: []}).cells].map(c => c.innerText.replace(/[▲▼↕]/g, '').trim()).join(',');
+  }
+  function apply(table) {
+    const head = table.rows[0];
+    if (!head || !head.querySelector('th')) return;
+    const st = state[keyOf(table)];
+    [...head.cells].forEach((th, i) => {
+      if (th.hasAttribute('onclick') || th.dataset.nosort !== undefined) return;
+      let ind = th.querySelector('.sort-ind');
+      if (!ind) { ind = document.createElement('span'); ind.className = 'sort-ind'; th.appendChild(ind); }
+      ind.textContent = st && st.col === i ? (st.dir < 0 ? ' ▼' : ' ▲') : ' ↕';
+      ind.style.opacity = st && st.col === i ? '1' : '.35';
+      th.style.cursor = 'pointer'; th.style.userSelect = 'none';
+    });
+    head.dataset.sortReady = '1';
+    if (!st) return;
+    const rows = [...table.rows].slice(1).filter(r => r.cells.length > 1);
+    if (rows.length < 2) return;
+    rows.sort((a, b) => {
+      const x = val(a.cells[st.col]), y = val(b.cells[st.col]);
+      if (x === null && y === null) return 0;
+      if (x === null) return 1;                     // blanks always last
+      if (y === null) return -1;
+      if (typeof x === 'number' && typeof y === 'number') return x === y ? 0 : (x < y ? 1 : -1) * (st.dir < 0 ? 1 : -1);
+      if (typeof x === 'number') return -1;         // numbers before text
+      return String(x).localeCompare(String(y)) * (st.dir < 0 ? -1 : 1);
+    });
+    const parent = rows[0].parentNode;
+    rows.forEach(r => parent.appendChild(r));
+  }
+  document.addEventListener('click', e => {
+    const th = e.target.closest('th');
+    if (!th || th.hasAttribute('onclick') || th.dataset.nosort !== undefined) return;
+    const table = th.closest('table'), row = th.parentElement;
+    if (!table || row !== table.rows[0]) return;
+    const k = keyOf(table), col = th.cellIndex, cur = state[k];
+    state[k] = {col, dir: cur && cur.col === col ? -cur.dir : -1};
+    apply(table);
+  });
+  let pending = false;
+  new MutationObserver(() => {                       // tables re-render on refresh: keep their sort
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      document.querySelectorAll('table').forEach(t => { if (t.rows[0] && !t.rows[0].dataset.sortReady) apply(t); });
+    });
+  }).observe(document.body, {childList: true, subtree: true});
+  document.querySelectorAll('table').forEach(apply);
+})();
 </script>
 </body>
 </html>
