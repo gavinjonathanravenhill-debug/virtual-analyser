@@ -28,7 +28,8 @@ def wallets():
     for e in ev:
         last.setdefault(e["wallet"], e["ts"])
     return jsonify({"vine_mint": VINE_MINT, "status": tracker.status,
-                    "wallets": [{**w, "last_seen": last.get(a)} for a, w in WALLETS.items()]})
+                    "wallets": [{**w, "last_seen": last.get(a), "last_tx": tracker.last_tx.get(a),
+                                 "checked": a in tracker.checked} for a, w in WALLETS.items()]})
 
 
 @solana_bp.route("/api/solana/events")

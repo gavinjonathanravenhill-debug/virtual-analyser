@@ -211,13 +211,17 @@ class Tracker:
         self.events = deque(maxlen=3000)
         self.seen = set()
         self.last_sig = {}      # wallet -> newest signature seen
+        self.last_tx = {}       # wallet -> blockTime of newest tx (any kind)
+        self.checked = set()    # wallets scanned at least once
         self.status = {"started": None, "last_poll": None, "last_error": None, "polls": 0}
         self.lock = threading.Lock()
 
     def poll_wallet(self, addr, limit=SIGS_PER_POLL):
         sigs = signatures(addr, limit, self.last_sig.get(addr))
+        self.checked.add(addr)
         if not sigs:
             return []
+        self.last_tx[addr] = max(self.last_tx.get(addr) or 0, sigs[0].get("blockTime") or 0)
         self.last_sig[addr] = sigs[0]["signature"]
         out = []
         for s in sigs:

@@ -167,9 +167,19 @@ async function loadWallets() {
   const g = $('#f-group').value, w = $('#f-wallet').value;
   $('#f-group').innerHTML = '<option value="">All groups</option>' + groups.map(x => `<option ${x === g ? 'selected' : ''}>${x}</option>`).join('');
   $('#f-wallet').innerHTML = '<option value="">All wallets</option>' + wallets.map(x => `<option value="${x.address}" ${x.address === w ? 'selected' : ''}>${x.label} (${short(x.address)})</option>`).join('');
-  $('#wallet-table').innerHTML = `<tr><th class="l">Group</th><th class="l">Label</th><th class="l">Address</th><th class="l">Your notes</th><th>Last activity</th><th></th></tr>` +
-    wallets.map(x => `<tr class="click ${x.alert ? 'alert' : ''}" onclick="pickWallet('${x.address}')"><td class="l">${chip(x.group)}</td><td class="l">${x.label}${x.alert ? ' 🔔' : ''}</td>
-      <td class="l">${solscan('account', x.address, short(x.address))}</td><td class="l dim">${x.note || ''}</td><td>${ago(x.last_seen)}</td><td class="dim">view →</td></tr>`).join('');
+  renderWallets();
+}
+let sortKey = 'last_seen', sortDir = -1;  // -1 = newest / Z first
+function sortBy(k) { sortDir = sortKey === k ? -sortDir : (k === 'last_seen' || k === 'last_tx' ? -1 : 1); sortKey = k; renderWallets(); }
+function renderWallets() {
+  const val = x => sortKey === 'last_seen' || sortKey === 'last_tx' ? (x[sortKey] || 0) : String(x[sortKey] || '').toLowerCase();
+  const list = [...wallets].sort((a, b) => { const va = val(a), vb = val(b); return va < vb ? -sortDir : va > vb ? sortDir : 0; });
+  const th = (k, t, cls = '') => `<th class="click ${cls}" style="cursor:pointer;user-select:none" onclick="sortBy('${k}')">${t}${sortKey === k ? (sortDir < 0 ? ' ▼' : ' ▲') : ' <span class="dim">↕</span>'}</th>`;
+  $('#wallet-table').innerHTML = `<tr>${th('group', 'Group', 'l')}${th('label', 'Label', 'l')}<th class="l">Address</th><th class="l">Your notes</th>${th('last_seen', 'Last trade')}${th('last_tx', 'Last tx (any)')}<th></th></tr>` +
+    list.map(x => `<tr class="click ${x.alert ? 'alert' : ''}" onclick="pickWallet('${x.address}')"><td class="l">${chip(x.group)}</td><td class="l">${x.label}${x.alert ? ' 🔔' : ''}</td>
+      <td class="l">${solscan('account', x.address, short(x.address))}</td><td class="l dim">${x.note || ''}</td><td>${ago(x.last_seen)}</td>
+      <td>${x.last_tx ? ago(x.last_tx) : x.checked ? '<span class="err" title="No transactions at all - probably a mistyped character">⚠ none – check address</span>' : '<span class="dim">scanning…</span>'}</td>
+      <td class="dim">view →</td></tr>`).join('');
 }
 function pickWallet(a) { $('#f-wallet').value = a; $('[data-t=feed]').click(); loadFeed(); }
 
