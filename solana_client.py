@@ -34,8 +34,20 @@ DUST_SOL = 0.002  # ignore SOL changes this small (fees, rent)
 _here = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(_here, "solana_wallets.json")) as f:
     _cfg = json.load(f)
-VINE_MINT = _cfg.get("vine_mint")
 EXCHANGES = _cfg.get("exchanges", {})
+FILE_LEVELS = _cfg.get("levels", [])
+
+# chain identity used by the shared signals engine / page
+CHAIN = "solana"
+NATIVE = "SOL"
+GT_NETWORK = "solana"
+BUBBLEMAPS_CHAIN = "solana"
+EXPLORER_TX = "https://solscan.io/tx/"
+PAGE = {"chain": "solana", "title": "Solana Wallets", "native": "SOL", "dexscreener": "solana",
+        "bubblemaps": "solana", "explorer": "https://solscan.io", "explorer_name": "Solscan",
+        "tx": "https://solscan.io/tx/", "addr": "https://solscan.io/account/", "token": "https://solscan.io/token/",
+        "holders_suffix": "#holders", "portfolio_suffix": "#portfolio", "addr_hint": "Solana address",
+        "rpc_note": "20-60s on the free Solana RPC (5-15s with Helius)"}
 WALLETS = {w["address"]: w for w in _cfg["wallets"]}
 # Extra wallets without editing the file: SOLANA_EXTRA_WALLETS="addr:Label,addr2:Label2"
 for _item in os.getenv("SOLANA_EXTRA_WALLETS", "").split(","):
@@ -207,7 +219,7 @@ def enrich(events):
     for e in events:
         w = WALLETS.get(e["wallet"], {})
         e.update(label=w.get("label", e["wallet"][:4] + "…" + e["wallet"][-4:]),
-                 group=w.get("group", "Lookup"), alert=bool(w.get("alert")))
+                 group=w.get("group", "Lookup"), alert=bool(w.get("alert")), min_usd=w.get("min_usd"))
         cp = e.get("counterparty")
         if cp:
             e["counterparty_label"] = EXCHANGES.get(cp) or (WALLETS.get(cp) or {}).get("label")
@@ -216,12 +228,10 @@ def enrich(events):
         if e["mint"] == "SOL" or e["mint"] in QUOTES:
             e["symbol"] = "SOL" if e["mint"] == "SOL" else QUOTES[e["mint"]]
             e["usd"] = e["amount"] * (sp or 0) if e["symbol"] == "SOL" else e["amount"]
-            e["is_vine"] = False
             continue
         t = info.get(e["mint"], {})
         e["symbol"], e["market_cap"], e["dex_url"] = t.get("symbol"), t.get("market_cap"), t.get("url")
         e["pair"] = t.get("pair")
-        e["is_vine"] = e["mint"] == VINE_MINT
         if e.get("quote"):  # price paid, from the swap itself
             qusd = e["quote_amount"] * (sp or 0) if e["quote"] == "SOL" else e["quote_amount"]
             e["usd"] = qusd or None
@@ -290,15 +300,13 @@ class Tracker:
                 self.status["last_error"] = str(e)
             time.sleep(POLL_SECONDS)
 
-    def query(self, wallet=None, group=None, vine_only=False, kinds=None, limit=500):
+    def query(self, wallet=None, group=None, kinds=None, limit=500):
         with self.lock:
             ev = list(self.events)
         if wallet:
             ev = [e for e in ev if e["wallet"] == wallet]
         if group:
             ev = [e for e in ev if e["group"] == group]
-        if vine_only:
-            ev = [e for e in ev if e.get("is_vine")]
         if kinds:
             ev = [e for e in ev if e["kind"] in kinds]
         return sorted(ev, key=lambda e: -e["ts"])[:limit]
@@ -310,9 +318,15 @@ _started = False
 
 def start_solana():
     global _started
-    if _started or os.getenv("SOLANA_TRACKER_OFF"):
+    if _started:
         return
     _started = True
+    import sys
+    import solana_signals as sig
+    sig.start_signals()
+    sig.register(sys.modules[__name__])  # page-added wallets + journal listener, before first poll
+    if os.getenv("SOLANA_TRACKER_OFF"):
+        return
     threading.Thread(target=tracker.loop, daemon=True, name="solana-tracker").start()
 
 
@@ -344,6 +358,6 @@ def token_report(mint):
             w["bought"] += e["amount"]; w["buy_usd"] += e.get("usd") or 0
         else:
             w["sold"] += e["amount"]; w["sell_usd"] += e.get("usd") or 0
-    return {"mint": mint, "info": info, "is_vine": mint == VINE_MINT,
+    return {"mint": mint, "info": info,
             "wallets": sorted(per.values(), key=lambda w: -(w["buy_usd"] + w["sell_usd"])),
             "events": ev[:100]}

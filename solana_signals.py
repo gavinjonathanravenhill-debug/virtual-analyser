@@ -1,14 +1,17 @@
 """
-Turns tracked-wallet activity into testable signals.
+Signals engine shared by every chain tracker (Solana, Robinhood Chain, ...).
 
-  * Signal journal  - every meaningful key-wallet / Vine move is logged with the price at the
-                      time, then re-priced at +1h / +24h / +7d so you can see which wallets
-                      actually lead price (SQLite; set SIGNAL_DB to a Railway volume path to keep
-                      it across deploys, e.g. /data/signals.db)
-  * Risk checks     - mint/freeze authority, top-holder concentration, liquidity vs mcap, pool age
+  * Signal journal  - meaningful key-wallet moves logged with the price at the time, re-priced at
+                      +1h / +24h / +7d (SQLite; set SIGNAL_DB=/data/signals.db on a Railway volume)
+  * Price zones     - your own zones for any coin, added from the page; alert when price enters one
+  * Wallets         - add / remove tracked wallets from the page (stored in the same DB)
+  * Risk checks     - GeckoTerminal holders + authorities, liquidity vs mcap, pool age, wash volume
   * Clusters        - same token bought by 2+ of your wallets within 72h
-  * Your levels     - price zones from solana_wallets.json ("levels")
   * Telegram alerts - via bot.py send() when TELEGRAM_BOT_TOKEN is set
+
+A chain module registers itself with register(module). It must expose:
+  CHAIN, NATIVE, QUOTES, WALLETS, EXCHANGES, GT_NETWORK, EXPLORER_TX, BUBBLEMAPS_CHAIN,
+  tracker (query/listeners), token_info(), _tok
 """
 
 import os
@@ -17,15 +20,14 @@ import threading
 import time
 from collections import defaultdict
 
-import solana_client as sc
+import requests
 
 DB_PATH = os.getenv("SIGNAL_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "signals.db"))
 MIN_USD = float(os.getenv("SIGNAL_MIN_USD", "5000"))        # key-wallet moves at least this big
-VINE_MIN_USD = float(os.getenv("SIGNAL_VINE_MIN_USD", "250"))  # any Vine trade at least this big
 FRESH_SECONDS = 45 * 60   # only journal moves we saw soon after they happened (fair entry price)
 HORIZONS = {"1h": 3600, "24h": 86400, "7d": 7 * 86400}
-LEVELS = sc._cfg.get("levels", [])
 
+CHAINS = {}
 _db_lock = threading.Lock()
 
 
@@ -41,6 +43,79 @@ def init_db():
             sig TEXT, wallet TEXT, ts INTEGER, logged_at INTEGER, label TEXT, grp TEXT,
             kind TEXT, mint TEXT, symbol TEXT, usd REAL, price0 REAL,
             p1h REAL, p24h REAL, p7d REAL, PRIMARY KEY (sig, wallet))""")
+        cols = [r[1] for r in c.execute("PRAGMA table_info(signals)")]
+        if "chain" not in cols:
+            c.execute("ALTER TABLE signals ADD COLUMN chain TEXT DEFAULT 'solana'")
+        c.execute("""CREATE TABLE IF NOT EXISTS levels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, chain TEXT, mint TEXT, name TEXT,
+            low REAL, high REAL, created INTEGER, inside INTEGER DEFAULT 0)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS wallets (
+            chain TEXT, address TEXT, label TEXT, grp TEXT, note TEXT, alert INTEGER,
+            created INTEGER, PRIMARY KEY (chain, address))""")
+        if "min_usd" not in [r[1] for r in c.execute("PRAGMA table_info(wallets)")]:
+            c.execute("ALTER TABLE wallets ADD COLUMN min_usd REAL")
+
+
+# --------------------------------------------------------------- chains ----
+def register(m):
+    """Called by each chain module once its tracker exists. Loads page-added wallets too."""
+    CHAINS[m.CHAIN] = m
+    init_db()
+    load_db_wallets(m)
+    if on_new_events_for(m) not in m.tracker.listeners:
+        m.tracker.listeners.append(on_new_events_for(m))
+
+
+_listeners = {}
+
+
+def on_new_events_for(m):
+    if m.CHAIN not in _listeners:
+        _listeners[m.CHAIN] = lambda events: on_new_events(events, m)
+    return _listeners[m.CHAIN]
+
+
+# -------------------------------------------------------------- wallets ----
+def load_db_wallets(m):
+    with _db_lock, db() as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM wallets WHERE chain=?", (m.CHAIN,))]
+    for r in rows:
+        _apply_wallet(m, r)
+
+
+def _apply_wallet(m, r):
+    if (r.get("grp") or "").strip().lower() == "exchange":
+        m.EXCHANGES[r["address"]] = r["label"]
+        return
+    m.WALLETS[r["address"]] = {"address": r["address"], "label": r["label"], "group": r["grp"] or "Mine",
+                               "note": r.get("note") or "", "alert": bool(r["alert"]), "source": "page",
+                               "min_usd": r.get("min_usd")}
+
+
+def add_wallet(m, address, label, group, note="", alert_on=True, min_usd=None):
+    try:
+        min_usd = float(min_usd) if min_usd not in (None, "") else None
+    except (TypeError, ValueError):
+        min_usd = None
+    r = {"chain": m.CHAIN, "address": address, "label": label or address[:6] + "…" + address[-4:],
+         "grp": group or "Mine", "note": note or "", "alert": 1 if alert_on else 0, "created": int(time.time()),
+         "min_usd": min_usd}
+    with _db_lock, db() as c:
+        c.execute("""INSERT OR REPLACE INTO wallets (chain, address, label, grp, note, alert, created, min_usd)
+                     VALUES (:chain,:address,:label,:grp,:note,:alert,:created,:min_usd)""", r)
+    _apply_wallet(m, r)
+    return r
+
+
+def remove_wallet(m, address):
+    with _db_lock, db() as c:
+        n = c.execute("DELETE FROM wallets WHERE chain=? AND address=?", (m.CHAIN, address)).rowcount
+    if n:
+        w = m.WALLETS.get(address)
+        if w and w.get("source") == "page":
+            m.WALLETS.pop(address, None)
+        m.EXCHANGES.pop(address, None)
+    return n
 
 
 # ---------------------------------------------------------------- alerts ---
@@ -70,71 +145,75 @@ def fmt_usd(v):
 
 
 # --------------------------------------------------------------- journal ---
-def is_signal(e):
-    if e.get("mint") in (None, "SOL") or e["mint"] in sc.QUOTES:
+def is_signal(e, m):
+    if e.get("mint") in (None, m.NATIVE) or e["mint"] in m.QUOTES:
         return False
     usd = e.get("usd") or 0
-    if e.get("to_exchange") and e.get("alert") and usd >= 1000:
-        return True  # tracked wallet depositing to an exchange = likely sell coming
-    if e.get("is_vine") and usd >= VINE_MIN_USD:
-        return True
-    return bool(e.get("alert")) and usd >= MIN_USD
+    floor = e.get("min_usd")  # optional per-wallet threshold (e.g. $250k for a busy treasury)
+    if not e.get("alert"):
+        return False
+    if e.get("to_exchange") or e.get("from_exchange"):
+        return usd >= (floor or 1000)  # exchange deposit = likely sell; withdrawal = restocking / accumulation
+    return usd >= (floor or MIN_USD)
 
 
-def on_new_events(events):
-    """Called by the tracker after every poll with freshly parsed + enriched events."""
+def on_new_events(events, m):
+    """Called by a tracker after every poll with freshly parsed + enriched events."""
     now = time.time()
-    fresh = [e for e in events if is_signal(e) and now - (e.get("ts") or 0) <= FRESH_SECONDS]
+    fresh = [e for e in events if is_signal(e, m) and now - (e.get("ts") or 0) <= FRESH_SECONDS]
     if fresh:
-        info = sc.token_info([e["mint"] for e in fresh])
+        info = m.token_info([e["mint"] for e in fresh])
         with _db_lock, db() as c:
             for e in fresh:
                 p0 = (info.get(e["mint"]) or {}).get("price") or e.get("price")
                 c.execute("""INSERT OR IGNORE INTO signals
-                    (sig, wallet, ts, logged_at, label, grp, kind, mint, symbol, usd, price0)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    (sig, wallet, ts, logged_at, label, grp, kind, mint, symbol, usd, price0, chain)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                           (e["sig"], e["wallet"], e["ts"], int(now), e["label"], e["group"],
-                           e["kind"], e["mint"], e.get("symbol"), e.get("usd"), p0))
+                           e["kind"], e["mint"], e.get("symbol"), e.get("usd"), p0, m.CHAIN))
                 arrow = {"BUY": "🟢 BUY", "SELL": "🔴 SELL", "IN": "⬇️ IN", "OUT": "⬆️ OUT"}[e["kind"]]
                 if e.get("to_exchange"):
-                    arrow = f"🚨 SENT TO {e.get('counterparty_label', 'EXCHANGE').upper()} (likely sell)"
+                    arrow = f"🚨 SENT TO {(e.get('counterparty_label') or 'EXCHANGE').upper()} (likely sell)"
+                elif e.get("from_exchange"):
+                    arrow = f"🏦 WITHDREW FROM {(e.get('counterparty_label') or 'EXCHANGE').upper()} (restocking / accumulating)"
                 alert(("sig", e["sig"], e["wallet"]),
-                      f"{arrow} <b>{e.get('symbol')}</b> {fmt_usd(e.get('usd'))}\n"
+                      f"{arrow} <b>{e.get('symbol')}</b> {fmt_usd(e.get('usd'))} [{m.CHAIN}]\n"
                       f"{e['label']} ({e['group']})\n"
                       f"mcap {fmt_usd(e.get('market_cap'))} · price {e.get('price') or p0}\n"
-                      f"https://solscan.io/tx/{e['sig']}")
-    for cl in clusters():
+                      f"{m.EXPLORER_TX}{e['sig']}")
+    for cl in clusters(m):
         if cl["fresh"]:
-            alert(("cluster", cl["mint"], len(cl["wallets"])),
-                  f"🫧 <b>Cluster buy: {cl['symbol']}</b> - {len(cl['wallets'])} of your wallets bought "
-                  f"in 72h ({fmt_usd(cl['buy_usd'])})\n" + ", ".join(w["label"] for w in cl["wallets"]) +
-                  f"\nhttps://v2.bubblemaps.io/map?address={cl['mint']}&chain=solana")
-    for lv in level_status():
-        if lv["inside"]:
-            alert(("level", lv["mint"], lv["name"], int(now // 3600)),
-                  f"🎯 <b>{lv['symbol']}</b> in your zone '{lv['name']}' "
-                  f"({lv['low']}–{lv['high']}): now {lv['price']}")
+            alert(("cluster", m.CHAIN, cl["mint"], len(cl["wallets"])),
+                  f"🫧 <b>Cluster buy: {cl['symbol']}</b> [{m.CHAIN}] - {len(cl['wallets'])} of your wallets "
+                  f"bought in 72h ({fmt_usd(cl['buy_usd'])})\n" + ", ".join(w["label"] for w in cl["wallets"]) +
+                  f"\nhttps://v2.bubblemaps.io/map?address={cl['mint']}&chain={m.BUBBLEMAPS_CHAIN}")
+    check_levels(m)
 
 
 def reprice_due():
-    """Fill in +1h / +24h / +7d prices for journal rows that are due."""
+    """Fill in +1h / +24h / +7d prices for journal rows that are due (all chains)."""
     now = time.time()
     with _db_lock, db() as c:
         rows = [dict(r) for r in c.execute(
-            "SELECT sig, wallet, ts, mint, p1h, p24h, p7d FROM signals WHERE p7d IS NULL")]
+            "SELECT sig, wallet, ts, mint, chain, p1h, p24h, p7d FROM signals WHERE p7d IS NULL")]
     due = [(r, h) for r in rows for h, secs in HORIZONS.items()
            if r["p" + h] is None and now >= r["ts"] + secs]
-    if not due:
-        return 0
-    for m in {r["mint"] for r, _ in due}:
-        sc._tok.pop(m, None)  # force fresh prices
-    prices = sc.token_info([r["mint"] for r, _ in due])
-    with _db_lock, db() as c:
-        for r, h in due:
-            p = (prices.get(r["mint"]) or {}).get("price")
-            if p:
-                c.execute(f"UPDATE signals SET p{h}=? WHERE sig=? AND wallet=?", (p, r["sig"], r["wallet"]))
-    return len(due)
+    n = 0
+    for chain in {r["chain"] or "solana" for r, _ in due}:
+        m = CHAINS.get(chain)
+        if not m:
+            continue
+        mine = [(r, h) for r, h in due if (r["chain"] or "solana") == chain]
+        for mint in {r["mint"] for r, _ in mine}:
+            m._tok.pop(mint, None)  # force fresh prices
+        prices = m.token_info([r["mint"] for r, _ in mine])
+        with _db_lock, db() as c:
+            for r, h in mine:
+                p = (prices.get(r["mint"]) or {}).get("price")
+                if p:
+                    c.execute(f"UPDATE signals SET p{h}=? WHERE sig=? AND wallet=?", (p, r["sig"], r["wallet"]))
+                    n += 1
+    return n
 
 
 def _ret(r, h):
@@ -146,20 +225,21 @@ def _ret(r, h):
     return raw if r["kind"] in ("BUY", "IN") else -raw
 
 
-def journal(limit=300):
+def journal(m, limit=300):
     with _db_lock, db() as c:
-        rows = [dict(r) for r in c.execute("SELECT * FROM signals ORDER BY ts DESC LIMIT ?", (limit,))]
+        rows = [dict(r) for r in c.execute(
+            "SELECT * FROM signals WHERE COALESCE(chain,'solana')=? ORDER BY ts DESC LIMIT ?", (m.CHAIN, limit))]
     for r in rows:
         for h in HORIZONS:
             r["r" + h] = _ret(r, h)
     return rows
 
 
-def scorecard():
+def scorecard(m):
     """Per wallet: how often price moved the way their trades pointed."""
     with _db_lock, db() as c:
-        rows = [dict(r) for r in c.execute("SELECT * FROM signals")]
-    agg = defaultdict(lambda: {"n": 0, **{f"{k}{h}": [] for h in HORIZONS for k in ("r",)}})
+        rows = [dict(r) for r in c.execute("SELECT * FROM signals WHERE COALESCE(chain,'solana')=?", (m.CHAIN,))]
+    agg = defaultdict(lambda: {"n": 0, **{f"r{h}": [] for h in HORIZONS}})
     for r in rows:
         a = agg[(r["wallet"], r["label"], r["grp"])]
         a["n"] += 1
@@ -180,11 +260,11 @@ def scorecard():
 
 
 # -------------------------------------------------------------- clusters ---
-def clusters(hours=72, min_wallets=2):
+def clusters(m, hours=72, min_wallets=2):
     since = time.time() - hours * 3600
     by = defaultdict(dict)
-    for e in sc.tracker.query(kinds=["BUY"], limit=3000):
-        if e["ts"] < since or e["mint"] in sc.QUOTES or e["mint"] == "SOL":
+    for e in m.tracker.query(kinds=["BUY"], limit=3000):
+        if e["ts"] < since or e["mint"] in m.QUOTES or e["mint"] == m.NATIVE:
             continue
         w = by[e["mint"]].setdefault(e["wallet"], {"wallet": e["wallet"], "label": e["label"],
                                                    "group": e["group"], "usd": 0.0, "last": 0,
@@ -202,73 +282,80 @@ def clusters(hours=72, min_wallets=2):
     return sorted(out, key=lambda c: (-len(c["wallets"]), -c["buy_usd"]))
 
 
-# ---------------------------------------------------------------- levels ---
-def level_status():
-    if not LEVELS:
+# ----------------------------------------------------------- price zones ---
+def _file_levels(m):
+    return [{**lv, "id": f"file-{i}", "source": "file"} for i, lv in enumerate(getattr(m, "FILE_LEVELS", []))]
+
+
+def list_levels(m):
+    with _db_lock, db() as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM levels WHERE chain=? ORDER BY created", (m.CHAIN,))]
+    return _file_levels(m) + [{**r, "source": "page"} for r in rows]
+
+
+def add_level(m, mint, name, low, high):
+    low, high = float(low), float(high)
+    if low > high:
+        low, high = high, low
+    with _db_lock, db() as c:
+        cur = c.execute("INSERT INTO levels (chain, mint, name, low, high, created) VALUES (?,?,?,?,?,?)",
+                        (m.CHAIN, mint, name or "Zone", low, high, int(time.time())))
+        return cur.lastrowid
+
+
+def remove_level(m, level_id):
+    with _db_lock, db() as c:
+        return c.execute("DELETE FROM levels WHERE chain=? AND id=?", (m.CHAIN, int(level_id))).rowcount
+
+
+def level_status(m):
+    lvls = list_levels(m)
+    if not lvls:
         return []
-    info = sc.token_info([lv["mint"] for lv in LEVELS])
+    info = m.token_info([lv["mint"] for lv in lvls])
     out = []
-    for lv in LEVELS:
+    for lv in lvls:
         t = info.get(lv["mint"]) or {}
         p = t.get("price")
-        out.append({**lv, "symbol": t.get("symbol"), "price": p,
-                    "inside": bool(p and lv["low"] <= p <= lv["high"]),
+        inside = bool(p and lv["low"] <= p <= lv["high"])
+        out.append({**lv, "symbol": t.get("symbol"), "price": p, "inside": inside,
                     "distance_pct": None if not p else
-                    (0 if lv["low"] <= p <= lv["high"] else
-                     ((lv["low"] - p) / p * 100 if p < lv["low"] else (lv["high"] - p) / p * 100))})
+                    (0 if inside else ((lv["low"] - p) / p * 100 if p < lv["low"] else (lv["high"] - p) / p * 100))})
     return out
+
+
+def check_levels(m):
+    """Alert once when price ENTERS a zone (and again only after it has left and come back)."""
+    for lv in level_status(m):
+        key = (m.CHAIN, lv["id"])
+        prev = _zone_state.get(key)
+        if prev is None and lv.get("source") == "page":
+            with _db_lock, db() as c:
+                row = c.execute("SELECT inside FROM levels WHERE id=?", (lv["id"],)).fetchone()
+            prev = bool(row and row[0])
+        _zone_state[key] = lv["inside"]
+        if lv["inside"] and not prev and lv["price"]:
+            _sent.discard(("level",) + key)
+            alert(("level",) + key,
+                  f"🎯 <b>{lv['symbol'] or lv['mint'][:6]}</b> [{m.CHAIN}] entered your zone '{lv['name']}' "
+                  f"({lv['low']:g} – {lv['high']:g}): now {lv['price']:g}")
+        if lv.get("source") == "page" and prev != lv["inside"]:
+            with _db_lock, db() as c:
+                c.execute("UPDATE levels SET inside=? WHERE id=?", (1 if lv["inside"] else 0, lv["id"]))
+
+
+_zone_state = {}
 
 
 # ----------------------------------------------------------- risk checks ---
 _risk = {}
 
 
-def risk_checks(mint):
-    hit = _risk.get(mint)
-    if hit and time.time() - hit[0] < (60 if any(c["status"] == "unknown" for c in hit[1]["checks"]) else 900):
-        return hit[1]
-    checks = []
-
-    def add(name, status, detail):
-        checks.append({"name": name, "status": status, "detail": detail})
-
-    gt = geckoterminal_info(mint)
-    holders = gt.get("holders") or {}
-    dist = holders.get("distribution_percentage") or {}
-    top10 = dist.get("top_10")
-    have_auth = "mint_authority" in gt and "freeze_authority" in gt
-    if have_auth:
-        ma, fa = gt.get("mint_authority"), gt.get("freeze_authority")
-        ma = None if str(ma).lower() in ("no", "none", "null", "false", "") else ma
-        fa = None if str(fa).lower() in ("no", "none", "null", "false", "") else fa
-        add("Mint authority", "bad" if ma else "ok",
-            "Can still mint more supply" if ma else "Revoked - supply is fixed")
-        add("Freeze authority", "bad" if fa else "ok",
-            "Can freeze your tokens (honeypot risk)" if fa else "Revoked")
-    if top10 is not None:
-        pct = float(top10)
-        add("Top 10 holders", "bad" if pct > 50 else "warn" if pct > 30 else "ok",
-            f"{pct:.1f}% of supply" + (f" · {int(holders['count']):,} holders" if holders.get("count") else "")
-            + " (source: GeckoTerminal)")
-    if have_auth and top10 is not None:
-        pass  # everything came from GeckoTerminal - no RPC needed
-    else:
-        _rpc_checks(mint, add, need_auth=not have_auth, need_holders=top10 is None)
-    _market_checks(mint, add)
-    score = sum({"ok": 0, "warn": 1, "bad": 3, "unknown": 0}[c["status"]] for c in checks)
-    verdict = "HIGH RISK" if score >= 5 else "CAUTION" if score >= 2 else "OK"
-    if any(c["status"] == "unknown" for c in checks):
-        verdict += " (incomplete)"
-    res = {"checks": checks, "verdict": verdict}
-    _risk[mint] = (time.time(), res)
-    return res
-
-
-def geckoterminal_info(mint):
-    """Free, keyless: holders count/top-10 %, mint & freeze authority (beta, not every token)."""
+def geckoterminal_info(network, token):
+    """Free, keyless: holders count/top-10 %, mint & freeze authority, GT score (beta coverage)."""
     try:
-        r = sc.requests.get(f"https://api.geckoterminal.com/api/v2/networks/solana/tokens/{mint}/info",
-                            headers={"accept": "application/json"}, timeout=15)
+        r = requests.get(f"https://api.geckoterminal.com/api/v2/networks/{network}/tokens/{token}/info",
+                         headers={"accept": "application/json"}, timeout=15)
         if r.ok:
             return (r.json().get("data") or {}).get("attributes") or {}
     except Exception:
@@ -276,22 +363,63 @@ def geckoterminal_info(mint):
     return {}
 
 
-def _rpc_checks(mint, add, need_auth=True, need_holders=True):
+def risk_checks(m, mint):
+    key = (m.CHAIN, mint)
+    hit = _risk.get(key)
+    if hit and time.time() - hit[0] < (60 if any(c["status"] == "unknown" for c in hit[1]["checks"]) else 900):
+        return hit[1]
+    checks = []
+
+    def add(name, status, detail):
+        checks.append({"name": name, "status": status, "detail": detail})
+
+    gt = geckoterminal_info(m.GT_NETWORK, mint)
+    holders = gt.get("holders") or {}
+    top10 = (holders.get("distribution_percentage") or {}).get("top_10")
+    have_auth = m.CHAIN == "solana" and "mint_authority" in gt and "freeze_authority" in gt
+    if have_auth:
+        ma, fa = gt.get("mint_authority"), gt.get("freeze_authority")
+        ma = None if str(ma).lower() in ("no", "none", "null", "false", "") else ma
+        fa = None if str(fa).lower() in ("no", "none", "null", "false", "") else fa
+        add("Mint authority", "bad" if ma else "ok", "Can still mint more supply" if ma else "Revoked - supply is fixed")
+        add("Freeze authority", "bad" if fa else "ok",
+            "Can freeze your tokens (honeypot risk)" if fa else "Revoked")
+    if top10 is not None:
+        pct = float(top10)
+        add("Top 10 holders", "bad" if pct > 50 else "warn" if pct > 30 else "ok",
+            f"{pct:.1f}% of supply" + (f" · {int(holders['count']):,} holders" if holders.get("count") else "")
+            + " (source: GeckoTerminal)")
+    if gt.get("gt_score") is not None:
+        sc_ = float(gt["gt_score"])
+        add("GeckoTerminal trust score", "ok" if sc_ >= 60 else "warn" if sc_ >= 35 else "bad", f"{sc_:.0f}/100")
+    if m.CHAIN == "solana" and not (have_auth and top10 is not None):
+        _solana_rpc_checks(m, mint, add, need_auth=not have_auth, need_holders=top10 is None)
+    elif top10 is None:
+        add("Holder concentration", "unknown", "Not available yet - use the Bubblemaps / Holders buttons above")
+    _market_checks(m, mint, add)
+    score = sum({"ok": 0, "warn": 1, "bad": 3, "unknown": 0}[c["status"]] for c in checks)
+    verdict = "HIGH RISK" if score >= 5 else "CAUTION" if score >= 2 else "OK"
+    if any(c["status"] == "unknown" for c in checks):
+        verdict += " (incomplete)"
+    res = {"checks": checks, "verdict": verdict}
+    _risk[key] = (time.time(), res)
+    return res
+
+
+def _solana_rpc_checks(m, mint, add, need_auth=True, need_holders=True):
     if need_auth:
         try:
-            acc = sc.rpc("getAccountInfo", [mint, {"encoding": "jsonParsed"}])
+            acc = m.rpc("getAccountInfo", [mint, {"encoding": "jsonParsed"}])
             parsed = (((acc or {}).get("value") or {}).get("data") or {}).get("parsed", {}).get("info", {})
             ma, fa = parsed.get("mintAuthority"), parsed.get("freezeAuthority")
-            add("Mint authority", "bad" if ma else "ok",
-                "Can still mint more supply" if ma else "Revoked - supply is fixed")
-            add("Freeze authority", "bad" if fa else "ok",
-                "Can freeze your tokens (honeypot risk)" if fa else "Revoked")
+            add("Mint authority", "bad" if ma else "ok", "Can still mint more supply" if ma else "Revoked - supply is fixed")
+            add("Freeze authority", "bad" if fa else "ok", "Can freeze your tokens (honeypot risk)" if fa else "Revoked")
         except Exception as e:
             add("Authorities", "unknown", _nice(e))
     if need_holders:
         try:
-            supply = float(sc.rpc("getTokenSupply", [mint])["value"]["uiAmount"] or 0)
-            largest = sc.rpc("getTokenLargestAccounts", [mint])["value"]
+            supply = float(m.rpc("getTokenSupply", [mint])["value"]["uiAmount"] or 0)
+            largest = m.rpc("getTokenLargestAccounts", [mint])["value"]
             top = [float(a.get("uiAmount") or 0) for a in largest[:10]]
             pct = sum(top) / supply * 100 if supply else 0
             top1 = top[0] / supply * 100 if supply and top else 0
@@ -302,12 +430,12 @@ def _rpc_checks(mint, add, need_auth=True, need_holders=True):
 
 
 def _nice(e):
-    m = str(e)
-    return "Free Solana RPC is busy" if "rate limit" in m.lower() or "429" in m else m[:120]
+    msg = str(e)
+    return "RPC is busy" if "rate limit" in msg.lower() or "429" in msg else msg[:120]
 
 
-def _market_checks(mint, add):
-    t = sc.token_info([mint]).get(mint) or {}
+def _market_checks(m, mint, add):
+    t = m.token_info([mint]).get(mint) or {}
     liq, mc = t.get("liquidity"), t.get("market_cap")
     if liq and mc:
         r = liq / mc * 100
@@ -330,12 +458,12 @@ _started = False
 
 
 def start_signals():
+    """Starts the shared re-pricing loop (chains register themselves separately)."""
     global _started
     if _started:
         return
     _started = True
     init_db()
-    sc.tracker.listeners.append(on_new_events)
 
     def loop():
         while True:

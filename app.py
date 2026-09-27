@@ -83,11 +83,25 @@ def _solana_auth():
 app.register_blueprint(solana_bp)
 try:
     from solana_client import start_solana
-    from solana_signals import start_signals
-    start_signals()  # register the journal listener before the first poll
-    start_solana()
+    start_solana()  # starts the shared signals engine + registers Solana before the first poll
 except Exception as _e:
     print(f"solana tracker failed to start, continuing: {_e}")
+
+# ---- Robinhood Chain wallet tracker (/robinhood) - same features, behind the site password ----
+try:
+    from robinhood_routes import robinhood_bp
+
+    @robinhood_bp.before_request
+    def _robinhood_auth():
+        auth = request.authorization
+        if not auth or not check_auth(auth.password):
+            return Response("Login required", 401, {"WWW-Authenticate": "Basic realm=\"Virtual Analyser\""})
+
+    app.register_blueprint(robinhood_bp)
+    from robinhood_client import start_robinhood
+    start_robinhood()
+except Exception as _e:
+    print(f"robinhood tracker failed to start, continuing: {_e}")
 try:
     start_realtime()
 except Exception as _e:

@@ -191,6 +191,7 @@ def classify(txs, n_sigs, span_h, hold):
     jito_share = sum(t["jito"] for t in ok) / n
     fail_share = sum(t["failed"] for t in txs) / max(len(txs), 1)
     rate = n_sigs / span_h if span_h else 0
+    rate *= min(1, n_sigs / 20)  # a handful of txs close together isn't "high frequency"
     direct = sum(1 for t in ok if t["programs"] & DEX_DIRECT and "Jupiter" not in t["programs"]) / n
     lp = sum(1 for t in ok if t["programs"] & LIQUIDITY_VENUES) / n
     # circular / arb: SOL or stable changes but no other token net change
@@ -260,7 +261,7 @@ def classify(txs, n_sigs, span_h, hold):
            f"Uses concentrated-liquidity pools in {lp:.0%} of txs" if lp > .1 else "",
            f"Focused on {tokens_traded} token(s)" if 0 < tokens_traded <= 5 else ""],
           "Legitimate MMs tighten spreads, but paid token MMs can 'paint the tape': walk price up to "
-          "a target band, then distribute into the buyers it attracts (your 0.069-0.071 Vine pattern).")
+          "a target band, then distribute into the buyers it attracts.")
     arche("Insider / dev distributor",
           45 * min(1, sells_after_in / 2) + 30 * (sells > 2 * max(buys, 1)) + 25 * min(1, to_cex / 3),
           [f"Received {len(ins)} token transfers (not bought) - {sells_after_in} later sold" if ins else "",

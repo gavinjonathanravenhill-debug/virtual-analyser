@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solana Wallets</title>
+<title>Wallet Tracker</title>
 <style>
   :root { --bg:#0b0f14; --panel:#131a22; --line:#223040; --text:#dbe4ee; --dim:#7f8fa3;
           --green:#2ecc71; --red:#ff5c5c; --amber:#f5b041; --blue:#4aa3ff; }
@@ -67,7 +67,6 @@
   tr.alert td { background:#132a1a; }
   .BUY { color:var(--green); font-weight:700; } .SELL { color:var(--red); font-weight:700; }
   .IN, .OUT { color:var(--amber); font-weight:600; }
-  .vine { color:#5fd16a; font-weight:700; }
   td.l, th.l { text-align:left; }
   #alerts .row { padding:6px 0; border-bottom:1px solid var(--line); }
   label.tog { display:flex; gap:6px; align-items:center; color:var(--dim); }
@@ -75,11 +74,12 @@
 </head>
 <body>
 <header>
-  <h1>Solana Wallets</h1>
+  <h1 id="page-title">Wallet Tracker</h1>
+  <a href="/solana">Solana</a> <a href="/robinhood">Robinhood Chain</a>
   <a href="/">&larr; Dashboard</a>
   <a href="/wintermute">Wintermute (ETH)</a>
   <span class="dim" id="status">starting…</span>
-  <div class="controls"><button onclick="openToken(VINE)">Screen Vine</button><button onclick="refresh()">Refresh</button></div>
+  <div class="controls"><button onclick="refresh()">Refresh</button></div>
 </header>
 
 <nav id="tabs">
@@ -96,35 +96,34 @@
       <div class="card" id="clusters"><h3>🫧 Cluster buys (2+ of your wallets, 72h)</h3><div class="dim">Waiting for data…</div></div>
       <div class="card" id="levels"><h3>🎯 Your price zones</h3><div class="dim">Loading…</div></div>
     </div>
-    <div class="card" id="alerts"><h3>Key wallet moves (Wintermute / market maker / exit)</h3><div class="dim">Waiting for first scan…</div></div>
+    <div class="card" id="alerts"><h3>Key wallet moves (🔔 wallets)</h3><div class="dim">Waiting for first scan…</div></div>
     <div class="controls" style="margin:0 0 12px;flex-wrap:wrap">
       <select id="f-group"><option value="">All groups</option></select>
       <select id="f-wallet"><option value="">All wallets</option></select>
-      <label class="tog"><input type="checkbox" id="f-vine"> Vine only</label>
       <label class="tog"><input type="checkbox" id="f-swaps" checked> Swaps only</label>
       <select id="f-min" title="Hide small trades (noise)">
         <option value="0">Any size</option><option value="100">≥ $100</option><option value="1000" selected>≥ $1k</option>
         <option value="5000">≥ $5k</option><option value="25000">≥ $25k</option></select>
     </div>
     <div class="card"><table id="feed-table"><tr><td class="dim l">Loading…</td></tr></table></div>
-    <div class="note">Checks every wallet every few minutes using Solana's free public RPC, so it builds up history from when the server started (last ~15 transactions per wallet on the first pass).
-      BUY/SELL = token swapped against SOL/USDC/USDT. IN/OUT = plain transfer. Price is what they actually paid.</div>
+    <div class="note">Checks every tracked wallet continuously and builds up history from when the server started.
+      BUY/SELL = token swapped against <span class="native">SOL</span>/stables. IN/OUT = plain transfer. Price is what they actually paid.</div>
   </section>
 
   <section class="tab" id="t-profile">
     <div class="controls" style="margin:0 0 12px;flex-wrap:wrap">
-      <input id="pf-addr" placeholder="Paste any Solana wallet address" style="flex:1;min-width:320px"
+      <input id="pf-addr" placeholder="Paste any wallet address" style="flex:1;min-width:320px"
         onkeydown="if(event.key==='Enter')runProfile()">
       <select id="pf-depth" title="How many recent transactions to analyse in detail">
         <option value="25">Quick (25 txs)</option><option value="40" selected>Normal (40 txs)</option><option value="80">Deep (80 txs)</option></select>
       <button onclick="runProfile()">Profile wallet</button>
     </div>
     <div id="pf-body"><div class="dim">Tells you what a wallet is, what it holds, and which manipulation pattern its behaviour matches best.
-      Takes 20-60s on the free Solana RPC. Heuristic - always read the evidence.</div></div>
+      Takes <span class="rpcnote">a little while</span>. Heuristic - always read the evidence.</div></div>
   </section>
 
   <section class="tab" id="t-signals">
-    <div class="warn">This is a <b>test bench, not trade calls</b>. Every key-wallet move ≥ <span id="sg-min">$5k</span> (and every Vine trade ≥ <span id="sg-vmin">$250</span>)
+    <div class="warn">This is a <b>test bench, not trade calls</b>. Every key-wallet move ≥ <span id="sg-min">$5k</span>
       is logged with the price when we saw it, then re-priced after 1h, 24h and 7d. <b>Return</b> is direction-adjusted: positive means price went the way their trade pointed
       (up after a buy, down after a sell). After a few weeks this shows which wallets actually lead price. Paper-trade it before risking money; not financial advice.</div>
     <div class="card"><h3>Wallet scorecard</h3><table id="sg-score"><tr><td class="dim l">Loading…</td></tr></table>
@@ -132,15 +131,30 @@
     <div class="card"><h3>Signal journal</h3><table id="sg-journal"></table><div class="note" id="sg-db"></div></div>
   </section>
 
-  <section class="tab" id="t-wallets"><div class="card"><table id="wallet-table"></table></div></section>
+  <section class="tab" id="t-wallets">
+    <div class="card"><h3>➕ Track a wallet</h3>
+      <div class="controls" style="flex-wrap:wrap;gap:6px;margin:0">
+        <input id="w-addr" placeholder="Wallet address" style="flex:1;min-width:260px">
+        <input id="w-label" placeholder="Label e.g. 'CASHCAT dev'" style="width:180px">
+        <input id="w-group" placeholder="Group e.g. 'Whales'" list="w-groups" style="width:140px"><datalist id="w-groups"></datalist>
+        <input id="w-note" placeholder="Notes (optional)" style="width:180px">
+        <input id="w-min" placeholder="Alert if ≥ $ (optional)" style="width:150px" title="Only alert on moves at least this big - use for busy wallets like a treasury">
+        <label class="tog"><input type="checkbox" id="w-alert" checked> 🔔 Alerts</label>
+        <button onclick="addWallet()">Add</button>
+      </div>
+      <div class="note">Group <b>Exchange</b> marks an exchange deposit wallet - any tracked wallet sending tokens to it is flagged "→ exchange (likely sell)".</div>
+    </div>
+    <div class="card"><table id="wallet-table"></table></div>
+    <div class="card" id="exch-card"></div>
+  </section>
 
   <section class="tab" id="t-lookup">
     <div class="controls" style="margin:0 0 12px">
-      <input id="tk-addr" placeholder="Paste any Solana token (mint) address to screen it" style="flex:1;min-width:320px">
+      <input id="tk-addr" placeholder="Paste any token address to screen it" style="flex:1;min-width:320px">
       <button onclick="openToken($('#tk-addr').value.trim())">Screen token</button>
     </div>
     <div class="controls" style="margin:0 0 12px">
-      <input id="lk-addr" placeholder="Paste any Solana wallet address" style="flex:1;min-width:320px">
+      <input id="lk-addr" placeholder="Paste any wallet address" style="flex:1;min-width:320px">
       <button onclick="runLookup()">Scan last 25 txs</button>
     </div>
     <div class="card"><table id="lk-table"><tr><td class="dim l">Scans any wallet once (not added to tracking). Takes ~20s.</td></tr></table></div>
@@ -159,6 +173,7 @@
 </div>
 
 <script>
+const CFG = {{ cfg|safe }};
 const $ = s => document.querySelector(s);
 const usd = v => v == null ? '–' : '$' + (Math.abs(v) >= 1e12 ? (v/1e12).toFixed(2) + 'T' : Math.abs(v) >= 1e9 ? (v/1e9).toFixed(2) + 'B' : Math.abs(v) >= 1e6 ? (v/1e6).toFixed(2) + 'M' : Math.abs(v) >= 1e3 ? (v/1e3).toFixed(1) + 'k' : (+v).toFixed(2));
 const pctv = v => v == null ? '–' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${(+v).toFixed(1)}%</span>`;
@@ -166,25 +181,36 @@ const amt = v => v == null ? '–' : v >= 1e6 ? (v/1e6).toFixed(2) + 'M' : v >= 
 const px = v => v ? '$' + (+v).toPrecision(4) : '–';
 const time = ts => ts ? new Date(ts * 1000).toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}) : '–';
 const ago = ts => { if (!ts) return 'never'; const s = Date.now()/1000 - ts; return s < 3600 ? Math.round(s/60) + 'm ago' : s < 86400 ? Math.round(s/3600) + 'h ago' : Math.round(s/86400) + 'd ago'; };
-const short = a => a.slice(0, 4) + '…' + a.slice(-4);
+const short = a => a ? a.slice(0, a.startsWith('0x') ? 6 : 4) + '…' + a.slice(-4) : '';
 const chip = g => `<span class="chip g-${(g || 'Other').split(' ')[0]}">${g}</span>`;
-const solscan = (kind, v, text) => `<a class="tx" target="_blank" href="https://solscan.io/${kind}/${v}">${text}</a>`;
-let wallets = [], seenAlerts = null, VINE = '';
+const XP = {tx: CFG.tx, account: CFG.addr, token: CFG.token};
+const solscan = (kind, v, text) => `<a class="tx" target="_blank" href="${XP[kind]}${v}">${text}</a>`;
+const API = '/api/' + CFG.chain;
+let wallets = [], seenAlerts = null;
 
 async function api(p) { const r = await fetch(p); const d = await r.json(); if (d.error) throw new Error(d.error); return d; }
+async function send(method, p, body) {
+  const r = await fetch(p, {method, headers: {'content-type': 'application/json'}, body: body ? JSON.stringify(body) : undefined});
+  const d = await r.json(); if (d.error) throw new Error(d.error); return d;
+}
+document.title = CFG.title; $('#page-title').textContent = CFG.title;
+document.querySelectorAll('.native').forEach(x => x.textContent = CFG.native);
+document.querySelectorAll('.rpcnote').forEach(x => x.textContent = CFG.rpc_note);
+document.querySelectorAll('header a[href="/' + CFG.chain + '"]').forEach(x => { x.style.color = 'var(--text)'; x.style.fontWeight = '600'; });
 
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.id === 't-' + b.dataset.t));
   if (b.dataset.t === 'signals') loadSignals();
 });
-['#f-group', '#f-wallet', '#f-vine', '#f-swaps', '#f-min'].forEach(s => $(s).onchange = loadFeed);
+['#f-group', '#f-wallet', '#f-swaps', '#f-min'].forEach(s => $(s).onchange = loadFeed);
 
 function row(e, showWallet = true) {
-  const tok = e.symbol === 'SOL' || !e.mint || e.mint === 'SOL' ? (e.symbol || 'SOL')
-    : `<a href="#" onclick="openToken('${e.mint}');return false" class="tx ${e.is_vine ? 'vine' : ''}">${e.symbol || short(e.mint)} 🔍</a>`;
+  const tok = e.symbol === CFG.native || !e.mint || e.mint === CFG.native ? (e.symbol || CFG.native)
+    : `<a href="#" onclick="openToken('${e.mint}');return false" class="tx">${e.symbol || short(e.mint)} 🔍</a>`;
   const paid = e.quote ? `${amt(e.quote_amount)} ${e.quote}`
     : e.counterparty ? (e.to_exchange ? `<span class="exch">→ ${e.counterparty_label}</span>`
+      : e.from_exchange ? `<span class="exch" style="background:var(--green);color:#0b0f14">← ${e.counterparty_label}</span>`
       : `${e.kind === 'OUT' ? '→' : '←'} ${e.counterparty_label || short(e.counterparty)}`) : '–';
   return `<tr class="${e.alert ? 'alert' : ''}"><td class="l">${time(e.ts)}</td>
     ${showWallet ? `<td class="l">${chip(e.group)} ${e.label}</td>` : ''}
@@ -195,8 +221,12 @@ function row(e, showWallet = true) {
 const head = (w = true) => `<tr><th class="l">Time</th>${w ? '<th class="l">Wallet</th>' : ''}<th class="l">Type</th><th class="l">Token</th><th>Amount</th><th>Paid / got</th><th>USD</th><th>Price</th><th>Mcap</th><th>Tx</th></tr>`;
 
 async function loadWallets() {
-  const d = await api('/api/solana/wallets');
-  wallets = d.wallets; VINE = d.vine_mint;
+  const d = await api(API + '/wallets');
+  wallets = d.wallets;
+  const ex = Object.entries(d.exchanges || {});
+  $('#exch-card').innerHTML = `<h3>Exchange wallets (${ex.length})</h3>` + (ex.length ? '<table><tr><th class="l">Exchange</th><th class="l">Address</th></tr>' +
+    ex.map(([a, n]) => `<tr><td class="l">${n}</td><td class="l">${solscan('account', a, short(a))}</td></tr>`).join('') + '</table>'
+    : '<div class="dim">None yet - add one above with group "Exchange".</div>');
   const st = d.status;
   $('#status').textContent = st.last_poll ? `${st.rpc || ''} · last scan ${ago(st.last_poll)} · ${st.polls} scans` + (st.last_error ? ' · ⚠ ' + st.last_error : '') : 'first scan running…';
   const groups = [...new Set(wallets.map(w => w.group))];
@@ -212,51 +242,100 @@ function renderWallets() {
   const list = [...wallets].sort((a, b) => { const va = val(a), vb = val(b); return va < vb ? -sortDir : va > vb ? sortDir : 0; });
   const th = (k, t, cls = '') => `<th class="click ${cls}" style="cursor:pointer;user-select:none" onclick="sortBy('${k}')">${t}${sortKey === k ? (sortDir < 0 ? ' ▼' : ' ▲') : ' <span class="dim">↕</span>'}</th>`;
   $('#wallet-table').innerHTML = `<tr>${th('group', 'Group', 'l')}${th('label', 'Label', 'l')}<th class="l">Address</th><th class="l">Your notes</th>${th('median_trade', 'Typical trade')}${th('last_seen', 'Last trade')}${th('last_tx', 'Last tx (any)')}<th></th></tr>` +
-    list.map(x => `<tr class="click ${x.alert ? 'alert' : ''}" onclick="pickWallet('${x.address}')"><td class="l">${chip(x.group)}</td><td class="l">${x.label}${x.alert ? ' 🔔' : ''}</td>
+    list.map(x => `<tr class="click ${x.alert ? 'alert' : ''}" onclick="pickWallet('${x.address}')"><td class="l">${chip(x.group)}</td><td class="l">${x.label}${x.alert ? ' 🔔' : ''}${x.min_usd ? ` <span class="dim" title="Alerts only at or above this size">≥${usd(x.min_usd)}</span>` : ''}</td>
       <td class="l">${solscan('account', x.address, short(x.address))}</td><td class="l dim">${x.note || ''}</td><td title="${x.trades || 0} swaps seen">${x.median_trade ? usd(x.median_trade) : '–'}</td><td>${ago(x.last_seen)}</td>
       <td>${x.last_tx ? ago(x.last_tx) : x.checked ? '<span class="err" title="No transactions at all - probably a mistyped character">⚠ none – check address</span>' : '<span class="dim">scanning…</span>'}</td>
-      <td><a href="#" class="tx" onclick="event.stopPropagation();profileWallet('${x.address}');return false">profile</a> · <span class="dim">feed →</span></td></tr>`).join('');
+      <td><a href="#" class="tx" onclick="event.stopPropagation();profileWallet('${x.address}');return false">profile</a> · <span class="dim">feed →</span>
+        ${x.source === 'page' ? `<button title="Stop tracking" onclick="event.stopPropagation();delWallet('${x.address}')">✕</button>` : ''}</td></tr>`).join('');
+  const dl = document.getElementById('w-groups');
+  if (dl) dl.innerHTML = [...new Set(['Exchange', 'Mine', ...wallets.map(w => w.group)])].map(g => `<option value="${g}">`).join('');
 }
 function pickWallet(a) { $('#f-wallet').value = a; $('[data-t=feed]').click(); loadFeed(); }
 
 async function loadFeed() {
   const q = new URLSearchParams({group: $('#f-group').value, wallet: $('#f-wallet').value,
-    vine: $('#f-vine').checked ? '1' : '', kinds: $('#f-swaps').checked ? 'BUY,SELL' : ''});
+    kinds: $('#f-swaps').checked ? 'BUY,SELL' : ''});
   try {
-    const d = await api('/api/solana/events?' + q);
+    const d = await api(API + '/events?' + q);
     const minUsd = +$('#f-min').value;
     d.events = d.events.filter(e => (e.usd || 0) >= minUsd);
     $('#feed-table').innerHTML = head() + (d.events.map(e => row(e)).join('') || '<tr><td colspan=10 class="dim l">Nothing yet for this filter — the first scan of all wallets takes a few minutes.</td></tr>');
-    const al = (await api('/api/solana/events')).events.filter(e => e.alert).slice(0, 8);
-    $('#alerts').innerHTML = '<h3>Key wallet moves (Wintermute / market maker / exit)</h3>' + (al.length ? '<table>' + head() + al.map(e => row(e)).join('') + '</table>' : '<div class="dim">No moves seen yet</div>');
+    const al = (await api(API + '/events')).events.filter(e => e.alert).slice(0, 8);
+    $('#alerts').innerHTML = '<h3>Key wallet moves (🔔 wallets)</h3>' + (al.length ? '<table>' + head() + al.map(e => row(e)).join('') + '</table>' : '<div class="dim">No moves seen yet</div>');
     const ids = al.map(e => e.sig).join();
     if (seenAlerts !== null && ids && ids !== seenAlerts) { document.title = '🔔 Key wallet moved'; beep(); }
     seenAlerts = ids;
   } catch (e) { $('#feed-table').innerHTML = `<tr><td class="err l">Error: ${e.message}</td></tr>`; }
 }
 function beep() { try { const c = new AudioContext(), o = c.createOscillator(); o.connect(c.destination); o.frequency.value = 880; o.start(); o.stop(c.currentTime + .15); } catch (e) {} }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = 'Solana Wallets'; });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) document.title = CFG.title; });
 
 // ---------- insights (clusters + levels) ----------
 async function loadInsights() {
   try {
-    const d = await api('/api/solana/insights');
+    const d = await api(API + '/insights');
     $('#clusters').innerHTML = '<h3>🫧 Cluster buys (2+ of your wallets, 72h)</h3>' + (d.clusters.length ? '<table><tr><th class="l">Token</th><th>Wallets</th><th>Bought</th><th>Mcap</th><th>Last</th></tr>' +
       d.clusters.map(c => `<tr class="click" onclick="openToken('${c.mint}')"><td class="l">${c.fresh ? '🔥 ' : ''}${c.symbol || short(c.mint)}</td>
         <td title="${c.wallets.map(w => w.label).join(', ')}">${c.wallets.length}</td><td>${usd(c.buy_usd)}</td><td>${usd(c.market_cap)}</td><td>${ago(c.last)}</td></tr>`).join('') + '</table>'
       : '<div class="dim">None yet - fires when 2+ of your wallets buy the same token within 72h.</div>');
     $('#levels').innerHTML = '<h3>🎯 Your price zones</h3>' + (d.levels.length ? '<table><tr><th class="l">Zone</th><th>Range</th><th>Now</th><th>Distance</th></tr>' +
-      d.levels.map(l => `<tr class="click ${l.inside ? 'alert' : ''}" onclick="openToken('${l.mint}')"><td class="l">${l.symbol || ''} · ${l.name}</td>
-        <td>${l.low} – ${l.high}</td><td>${px(l.price)}</td><td>${l.inside ? '<b class="pos">IN ZONE</b>' : pctv(l.distance_pct)}</td></tr>`).join('') + '</table>'
-      : '<div class="dim">Add zones under "levels" in solana_wallets.json</div>');
+      d.levels.map(l => `<tr class="click ${l.inside ? 'alert' : ''}" onclick="openToken('${l.mint}')"><td class="l">${l.symbol || short(l.mint)} · ${l.name}</td>
+        <td>${l.low} – ${l.high}</td><td>${px(l.price)}</td><td>${l.inside ? '<b class="pos">IN ZONE</b>' : pctv(l.distance_pct)}</td>
+        <td>${l.source === 'page' ? `<button title="Remove zone" onclick="event.stopPropagation();delZone(${l.id})">✕</button>` : '<span class="dim" title="Defined in the wallets file">file</span>'}</td></tr>`).join('') + '</table>'
+      : '<div class="dim">No zones yet - add one below or from any token panel (🎯 button).</div>') + zoneForm();
   } catch (e) { $('#clusters').innerHTML = `<div class="err">Error: ${e.message}</div>`; }
+}
+
+function zoneForm(mint = '', price = null) {
+  const v = id => (document.getElementById(id) || {}).value || '';
+  return `<div class="controls" style="margin-top:10px;flex-wrap:wrap;gap:6px">
+    <input id="z-mint" placeholder="Token address" value="${mint || v('z-mint')}" style="flex:1;min-width:200px">
+    <input id="z-name" placeholder="Name e.g. 'sell zone'" value="${v('z-name')}" style="width:140px">
+    <input id="z-low" placeholder="Low price" value="${price ? (price * 0.9).toPrecision(4) : v('z-low')}" style="width:100px">
+    <input id="z-high" placeholder="High price" value="${price ? (price * 1.1).toPrecision(4) : v('z-high')}" style="width:100px">
+    <button onclick="addZone()">+ Add zone</button></div>
+    <div class="note">Alerts (page + Telegram) when price moves INTO the zone. For "below X" set low to 0; for "above X" set high very large.</div>`;
+}
+async function addZone() {
+  try {
+    await send('POST', API + '/levels', {mint: $('#z-mint').value.trim(), name: $('#z-name').value.trim(),
+      low: $('#z-low').value, high: $('#z-high').value});
+    ['z-mint', 'z-name', 'z-low', 'z-high'].forEach(id => document.getElementById(id).value = '');
+    loadInsights();
+  } catch (e) { alertBox(e.message); }
+}
+async function delZone(id) { try { await send('DELETE', API + '/levels?id=' + id); loadInsights(); } catch (e) { alertBox(e.message); } }
+function zoneFromToken(mint) {
+  const priceTxt = (document.querySelector('#tk-body .tile .v') || {}).innerText || '';
+  const p = parseFloat(priceTxt.replace(/[$,]/g, ''));
+  closeToken(); $('[data-t=feed]').click();
+  $('#levels').insertAdjacentHTML('beforeend', '');
+  const f = $('#levels .controls'); if (f) f.outerHTML = zoneForm(mint, isFinite(p) ? p : null);
+  $('#z-name').focus(); $('#levels').scrollIntoView({behavior: 'smooth'});
+}
+function alertBox(msg) { const d = document.createElement('div'); d.className = 'warn'; d.style.cssText = 'position:fixed;top:12px;right:12px;z-index:20;max-width:420px';
+  d.textContent = msg; document.body.appendChild(d); setTimeout(() => d.remove(), 5000); }
+
+// ---------- wallets add / remove ----------
+async function addWallet() {
+  try {
+    await send('POST', API + '/wallets', {address: $('#w-addr').value.trim(), label: $('#w-label').value.trim(),
+      group: $('#w-group').value.trim() || 'Mine', note: $('#w-note').value.trim(), alert: $('#w-alert').checked,
+      min_usd: $('#w-min').value.replace(/[$,]/g, '').replace(/k$/i, '000').replace(/m$/i, '000000')});
+    ['w-addr', 'w-label', 'w-note', 'w-min'].forEach(id => document.getElementById(id).value = '');
+    await loadWallets(); alertBox('Added - it will be scanned on the next poll.');
+  } catch (e) { alertBox(e.message); }
+}
+async function delWallet(a) {
+  if (!window.confirmDel || window.confirmDel !== a) { window.confirmDel = a; alertBox('Click ✕ again to remove this wallet'); return; }
+  try { await send('DELETE', API + '/wallets?address=' + encodeURIComponent(a)); window.confirmDel = null; loadWallets(); } catch (e) { alertBox(e.message); }
 }
 
 // ---------- signal journal ----------
 async function loadSignals() {
   try {
-    const d = await api('/api/solana/signals');
-    $('#sg-min').textContent = usd(d.min_usd); $('#sg-vmin').textContent = usd(d.vine_min_usd);
+    const d = await api(API + '/signals');
+    $('#sg-min').textContent = usd(d.min_usd);
     const hit = v => v == null ? '–' : `<span class="${v >= 55 ? 'pos' : v <= 45 ? 'neg' : ''}">${v.toFixed(0)}%</span>`;
     $('#sg-score').innerHTML = `<tr><th class="l">Wallet</th><th>Signals</th><th>Avg 1h</th><th>Hit 1h</th><th>Avg 24h</th><th>Hit 24h (n)</th><th>Avg 7d</th><th>Hit 7d (n)</th></tr>` +
       (d.scorecard.map(r => `<tr><td class="l">${chip(r.group)} ${r.label}</td><td>${r.signals}</td><td>${pctv(r.avg_1h)}</td><td>${hit(r.hit_1h)}</td>
@@ -280,7 +359,7 @@ async function runProfile() {
   const el = $('#pf-body');
   el.innerHTML = `<div class="loading">Profiling ${short(a)}… reading history, holdings and recent trades (20-60s)</div>`;
   try {
-    const d = await api(`/api/solana/profile?address=${encodeURIComponent(a)}&depth=${$('#pf-depth').value}`);
+    const d = await api(`${API}/profile?address=${encodeURIComponent(a)}&depth=${$('#pf-depth').value}`);
     if (d.kind !== 'wallet') {
       el.innerHTML = `<div class="warn">${d.summary}</div>` + (d.kind === 'token' ? `<button onclick="openToken('${a}')">Screen this token</button>` : '');
       return;
@@ -292,13 +371,13 @@ async function runProfile() {
     const lbl = x => x.label ? `<b>${x.label}</b>` : `<span class="dim">unknown</span>`;
     el.innerHTML = `
       <div class="card"><h3>${d.label ? d.label + ' · ' : ''}${solscan('account', a, short(a))}
-          <a class="tx" target="_blank" href="https://solscan.io/account/${a}#portfolio" style="margin-left:8px">portfolio ↗</a></h3>
+          <a class="tx" target="_blank" href="${CFG.addr}${a}${CFG.portfolio_suffix}" style="margin-left:8px">portfolio ↗</a></h3>
         <div style="font-size:16px;margin:4px 0 8px">${d.summary}</div>
         ${d.note ? `<div class="note">${d.note}</div>` : ''}
         ${d.linked_to_your_wallets.length ? `<div class="warn">🔗 Interacted with your tracked wallets: ${d.linked_to_your_wallets.map(c => c.label.replace('Your list: ', '') + ` (${c.count}x)`).join(', ')}</div>` : ''}
       </div>
       <div class="tiles">
-        <div class="tile"><div class="k">Total value</div><div class="v">${usd(h.total_usd)}</div><div class="dim">${h.sol.toFixed(2)} SOL + ${h.token_count} tokens</div></div>
+        <div class="tile"><div class="k">Total value</div><div class="v">${usd(h.total_usd)}</div><div class="dim">${h.sol.toFixed(3)} ${CFG.native} + ${h.token_count} tokens</div></div>
         <div class="tile"><div class="k">Activity</div><div class="v">${st.tx_per_hour >= 1 ? st.tx_per_hour.toFixed(0) : st.tx_per_hour.toFixed(2)}/h</div><div class="dim">${ac.tx_seen}${ac.complete_history ? '' : '+'} txs</div></div>
         <div class="tile"><div class="k">Wallet age</div><div class="v">${ac.first_seen ? ago(ac.first_seen).replace(' ago', '') : '> ' + ago(ac.oldest_scanned).replace(' ago', '')}</div><div class="dim">last active ${ago(ac.last_seen)}</div></div>
         <div class="tile"><div class="k">Typical trade</div><div class="v">${usd(st.median_trade_usd)}</div><div class="dim">${st.buys} buys / ${st.sells} sells</div></div>
@@ -318,7 +397,7 @@ async function runProfile() {
       </div>
       <div class="card"><h3>Holdings (${h.priced} priced of ${h.token_count})</h3>
         <table><tr><th class="l">Token</th><th>Amount</th><th>Value</th><th>% of wallet</th><th>Mcap</th><th class="l">Flag</th></tr>
-        <tr><td class="l">SOL</td><td>${h.sol.toFixed(3)}</td><td>${usd(h.sol_usd)}</td><td>${h.total_usd ? (h.sol_usd / h.total_usd * 100).toFixed(1) + '%' : '–'}</td><td>–</td><td></td></tr>
+        <tr><td class="l">${CFG.native}</td><td>${h.sol.toFixed(4)}</td><td>${usd(h.sol_usd)}</td><td>${h.total_usd ? (h.sol_usd / h.total_usd * 100).toFixed(1) + '%' : '–'}</td><td>–</td><td></td></tr>
         ${h.tokens.slice(0, 40).map(t => `<tr class="click" onclick="openToken('${t.mint}')"><td class="l">${t.symbol} 🔍</td><td>${amt(t.amount)}</td><td>${usd(t.usd)}</td>
           <td>${t.pct ? t.pct.toFixed(1) + '%' : '–'}</td><td>${usd(t.market_cap)}</td><td class="l ${t.flag ? 'neg' : ''}">${t.flag}</td></tr>`).join('')}
         </table>${h.tokens.length > 40 ? `<div class="note">+ ${h.tokens.length - 40} more (mostly dust)</div>` : ''}</div>
@@ -338,17 +417,18 @@ async function openToken(mint) {
   if (!mint) return;
   $('#modal').classList.add('on');
   $('#tk-title').textContent = 'Loading ' + short(mint) + '…';
-  $('#tk-links').innerHTML = btn(`https://v2.bubblemaps.io/map?address=${mint}&chain=solana`, '🫧 Bubblemaps (connected wallets)')
-    + btn(`https://dexscreener.com/solana/${mint}`, '📈 DexScreener')
-    + btn(`https://solscan.io/token/${mint}#holders`, 'Holders (Solscan)');
+  $('#tk-links').innerHTML = btn(`https://v2.bubblemaps.io/map?address=${mint}&chain=${CFG.bubblemaps}`, '🫧 Bubblemaps (connected wallets)')
+    + btn(`https://dexscreener.com/${CFG.dexscreener}/${mint}`, '📈 DexScreener')
+    + btn(`${CFG.token}${mint}${CFG.holders_suffix}`, `Holders (${CFG.explorer_name})`)
+    + `<button onclick="zoneFromToken('${mint}')">🎯 Add price zone</button>`;
   $('#tk-body').innerHTML = '<div class="loading">Screening…</div>';
   try {
-    const d = await api('/api/solana/token/' + mint);
+    const d = await api(API + '/token/' + mint);
     const i = d.info || {};
     const pct = v => v == null ? '–' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${(+v).toFixed(1)}%</span>`;
     const age = i.created ? ago(i.created / 1000).replace(' ago', '') : '–';
     const liqRatio = i.liquidity && i.market_cap ? (i.liquidity / i.market_cap * 100).toFixed(1) + '%' : '–';
-    $('#tk-title').innerHTML = `${i.name || ''} <span class="${d.is_vine ? 'vine' : ''}">${i.symbol || short(mint)}</span> <span class="dim" style="font-size:12px">${short(mint)} · ${i.dex || ''}</span>`;
+    $('#tk-title').innerHTML = `${i.name || ''} <span>${i.symbol || short(mint)}</span> <span class="dim" style="font-size:12px">${short(mint)} · ${i.dex || ''}</span>`;
     $('#tk-body').innerHTML = `
       <div class="tiles">
         <div class="tile"><div class="k">Price</div><div class="v">${px(i.price)}</div><div class="dim">1h ${pct(i.change_1h)} · 24h ${pct(i.change_24h)}</div></div>
@@ -360,7 +440,7 @@ async function openToken(mint) {
       ${d.risk ? `<div class="card"><h3>Risk checks · <span class="${d.risk.verdict.startsWith('OK') ? 'pos' : d.risk.verdict.startsWith('CAUTION') ? '' : 'neg'}" style="${d.risk.verdict.startsWith('CAUTION') ? 'color:var(--amber)' : ''}">${d.risk.verdict}</span></h3>
         <table>${d.risk.checks.map(c => `<tr><td class="l">${RISK_ICON[c.status]} ${c.name}</td><td class="l dim">${c.detail}</td></tr>`).join('')}</table></div>` : ''}
       ${(d.levels || []).map(l => `<div class="${l.inside ? 'warn' : 'note'}">🎯 Your zone "${l.name}": ${l.low}–${l.high} · now ${px(l.price)} ${l.inside ? '<b>- IN ZONE</b>' : ''}</div>`).join('')}
-      ${i.pair ? `<iframe src="https://dexscreener.com/solana/${i.pair}?embed=1&theme=dark&info=0" style="width:100%;height:440px;border:1px solid var(--line);border-radius:8px;background:#000"></iframe>`
+      ${i.pair ? `<iframe src="https://dexscreener.com/${CFG.dexscreener}/${i.pair}?embed=1&theme=dark&info=0" style="width:100%;height:440px;border:1px solid var(--line);border-radius:8px;background:#000"></iframe>`
                : '<div class="warn">No DexScreener pool found for this token.</div>'}
       <div class="card" style="margin-top:14px"><h3>Your tracked wallets in this token</h3>
         <table><tr><th class="l">Wallet</th><th>Trades</th><th>Bought</th><th>Sold</th><th>Buy USD</th><th>Sell USD</th><th>Last</th><th></th></tr>
@@ -381,8 +461,8 @@ async function runLookup() {
   if (!a) return;
   $('#lk-table').innerHTML = '<tr><td class="dim l">Scanning ' + short(a) + '…</td></tr>';
   try {
-    const d = await api('/api/solana/lookup?address=' + encodeURIComponent(a));
-    $('#lk-table').innerHTML = head(false) + (d.events.map(e => row(e, false)).join('') || '<tr><td colspan=9 class="dim l">No token or SOL moves in the last 25 transactions</td></tr>');
+    const d = await api(API + '/lookup?address=' + encodeURIComponent(a));
+    $('#lk-table').innerHTML = head(false) + (d.events.map(e => row(e, false)).join('') || '<tr><td colspan=9 class="dim l">No token moves found recently</td></tr>');
   } catch (e) { $('#lk-table').innerHTML = `<tr><td class="err l">Error: ${e.message}</td></tr>`; }
 }
 

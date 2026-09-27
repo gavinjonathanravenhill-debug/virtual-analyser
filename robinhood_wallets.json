@@ -1,0 +1,6 @@
+{
+  "_note": "Robinhood Chain wallets to track (0x addresses). Easier: add them from the Wallets tab on /robinhood. group 'Exchange' marks exchange deposit wallets.",
+  "wallets": [],
+  "exchanges": {},
+  "levels": []
+}
