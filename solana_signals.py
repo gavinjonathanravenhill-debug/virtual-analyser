@@ -74,6 +74,8 @@ def is_signal(e):
     if e.get("mint") in (None, "SOL") or e["mint"] in sc.QUOTES:
         return False
     usd = e.get("usd") or 0
+    if e.get("to_exchange") and e.get("alert") and usd >= 1000:
+        return True  # tracked wallet depositing to an exchange = likely sell coming
     if e.get("is_vine") and usd >= VINE_MIN_USD:
         return True
     return bool(e.get("alert")) and usd >= MIN_USD
@@ -94,6 +96,8 @@ def on_new_events(events):
                           (e["sig"], e["wallet"], e["ts"], int(now), e["label"], e["group"],
                            e["kind"], e["mint"], e.get("symbol"), e.get("usd"), p0))
                 arrow = {"BUY": "🟢 BUY", "SELL": "🔴 SELL", "IN": "⬇️ IN", "OUT": "⬆️ OUT"}[e["kind"]]
+                if e.get("to_exchange"):
+                    arrow = f"🚨 SENT TO {e.get('counterparty_label', 'EXCHANGE').upper()} (likely sell)"
                 alert(("sig", e["sig"], e["wallet"]),
                       f"{arrow} <b>{e.get('symbol')}</b> {fmt_usd(e.get('usd'))}\n"
                       f"{e['label']} ({e['group']})\n"

@@ -31,6 +31,7 @@ _here = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(_here, "solana_wallets.json")) as f:
     _cfg = json.load(f)
 VINE_MINT = _cfg.get("vine_mint")
+EXCHANGES = _cfg.get("exchanges", {})
 WALLETS = {w["address"]: w for w in _cfg["wallets"]}
 # Extra wallets without editing the file: SOLANA_EXTRA_WALLETS="addr:Label,addr2:Label2"
 for _item in os.getenv("SOLANA_EXTRA_WALLETS", "").split(","):
@@ -148,11 +149,14 @@ def parse_tx(tx, owner):
     keys = [k["pubkey"] if isinstance(k, dict) else k for k in msg["accountKeys"]]
 
     deltas = {}  # mint -> change (ui amount)
+    others = {}  # (mint, owner) -> change, for everyone else in the tx
     for side, sign in (("preTokenBalances", -1), ("postTokenBalances", 1)):
         for b in meta.get(side) or []:
-            if b.get("owner") != owner:
-                continue
             amt = float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0)
+            if b.get("owner") != owner:
+                k = (b["mint"], b.get("owner"))
+                others[k] = others.get(k, 0) + sign * amt
+                continue
             deltas[b["mint"]] = deltas.get(b["mint"], 0) + sign * amt
     sol = 0.0
     if owner in keys:
@@ -182,6 +186,10 @@ def parse_tx(tx, owner):
             ev["quote_amount"] = abs(q[1])
         if len(tokens) > 1:
             ev["other_tokens"] = len(tokens) - 1
+        if not q:  # plain transfer: who was on the other side?
+            cands = [(o, d) for (m, o), d in others.items() if m == mint and o and (d > 0) != (amt > 0)]
+            if cands:
+                ev["counterparty"] = max(cands, key=lambda x: abs(x[1]))[0]
     else:  # only SOL/stables moved
         m, d = max(quotes.items(), key=lambda x: abs(x[1]))
         ev.update(mint=m if m != "SOL" else "SOL", amount=abs(d), kind="IN" if d > 0 else "OUT")
@@ -196,6 +204,11 @@ def enrich(events):
         w = WALLETS.get(e["wallet"], {})
         e.update(label=w.get("label", e["wallet"][:4] + "…" + e["wallet"][-4:]),
                  group=w.get("group", "Lookup"), alert=bool(w.get("alert")))
+        cp = e.get("counterparty")
+        if cp:
+            e["counterparty_label"] = EXCHANGES.get(cp) or (WALLETS.get(cp) or {}).get("label")
+            e["to_exchange"] = e["kind"] == "OUT" and cp in EXCHANGES
+            e["from_exchange"] = e["kind"] == "IN" and cp in EXCHANGES
         if e["mint"] == "SOL" or e["mint"] in QUOTES:
             e["symbol"] = "SOL" if e["mint"] == "SOL" else QUOTES[e["mint"]]
             e["usd"] = e["amount"] * (sp or 0) if e["symbol"] == "SOL" else e["amount"]

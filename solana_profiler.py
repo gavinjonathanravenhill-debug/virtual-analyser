@@ -49,6 +49,7 @@ KNOWN = {
     "AC5RDfQFmDS1deWZos921JfqscXdByf8BKHs5ACWjtW2": "Bybit hot wallet",
     "5VCwKtCXgCJ6kit5FybXjvriW3xELsFDhYrPSqtJNmcD": "OKX hot wallet",
 }
+KNOWN.update({a: n + " (exchange)" for a, n in sc.EXCHANGES.items()})
 MAJORS = {"SOL", "USDC", "USDT"}
 
 _cache = {}
@@ -352,7 +353,7 @@ def profile(address, depth=40):
         sn["score"] = round(100 * early / nb) if nb >= 2 else 0
         sn["evidence"] = [f"{early} of {nb} buys were within 10 min of the pool launching"] if early else []
         ranked.sort(key=lambda a: -a["score"])
-    if out.get("label", "") and (out["label"] or "").endswith("hot wallet"):
+    if out.get("label", "") and ((out["label"] or "").endswith("hot wallet") or "(exchange)" in (out["label"] or "")):
         ranked.insert(0, {"name": "Exchange", "score": 100, "evidence": [out["label"]],
                           "manipulation": "Custodial exchange wallet - flows are many users, not one trader."})
     out["archetypes"] = ranked[:4]

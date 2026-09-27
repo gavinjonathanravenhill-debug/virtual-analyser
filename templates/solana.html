@@ -62,6 +62,8 @@
   .g-Wintermute { background:#5fd16a; } .g-Market { background:#d9b36a; } .g-Bots { background:#e0a526; }
   .g-Whales { background:#dcdc3a; } .g-Clever { background:#e040d0; } .g-Other { background:#9aa5b1; }
   .g-Extra, .g-Lookup { background:#4aa3ff; }
+  .g-PENGU { background:#8fd3ff; }
+  .exch { color:#fff; background:var(--red); border-radius:4px; padding:0 5px; font-weight:700; font-size:11px; }
   tr.alert td { background:#132a1a; }
   .BUY { color:var(--green); font-weight:700; } .SELL { color:var(--red); font-weight:700; }
   .IN, .OUT { color:var(--amber); font-weight:600; }
@@ -181,7 +183,9 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
 function row(e, showWallet = true) {
   const tok = e.symbol === 'SOL' || !e.mint || e.mint === 'SOL' ? (e.symbol || 'SOL')
     : `<a href="#" onclick="openToken('${e.mint}');return false" class="tx ${e.is_vine ? 'vine' : ''}">${e.symbol || short(e.mint)} 🔍</a>`;
-  const paid = e.quote ? `${amt(e.quote_amount)} ${e.quote}` : '–';
+  const paid = e.quote ? `${amt(e.quote_amount)} ${e.quote}`
+    : e.counterparty ? (e.to_exchange ? `<span class="exch">→ ${e.counterparty_label}</span>`
+      : `${e.kind === 'OUT' ? '→' : '←'} ${e.counterparty_label || short(e.counterparty)}`) : '–';
   return `<tr class="${e.alert ? 'alert' : ''}"><td class="l">${time(e.ts)}</td>
     ${showWallet ? `<td class="l">${chip(e.group)} ${e.label}</td>` : ''}
     <td class="l ${e.kind}">${e.kind}</td><td class="l">${tok}</td><td>${amt(e.amount)}</td><td>${paid}</td>

@@ -211,6 +211,139 @@
       "group": "Other",
       "note": "No income inside wallet of Vine; 6K",
       "alert": false
+    },
+    {
+      "address": "GcEXZEUhbK4KyFV7B7q28Zh7PKzGsC3oqgjvGRLaZJZu",
+      "label": "PENGU treasury (Fireblocks)",
+      "group": "PENGU team",
+      "note": "#1 holder 9.61%; sent $196M out to 13 wallets, nothing in",
+      "alert": true
+    },
+    {
+      "address": "GziA3ZgkmnUcK9vuscnDpzLTcpHTSnmyQ6JwPKP5oSkR",
+      "label": "PENGU token deployer",
+      "group": "PENGU team",
+      "note": "6.53% of supply",
+      "alert": true
+    },
+    {
+      "address": "9evXAk8acYJHnnaLaHHiNi7UPsamLQ51sgWMjiCiniHe",
+      "label": "PENGU Fireblocks custody 2",
+      "group": "PENGU team",
+      "note": "0.79%; Bubblemaps: Fireblocks Custody, in Cluster 1",
+      "alert": true
+    },
+    {
+      "address": "86pMJeFygiX9DgFFToWAgJ8UkLHEiczUhF3dg5XksG17",
+      "label": "PENGU cluster #11",
+      "group": "PENGU cluster",
+      "note": "1.52%; received from treasury",
+      "alert": true
+    },
+    {
+      "address": "GHQKNzcgEfTqwXiMpfYFBn4MnUL54WBKwZA5EwRKrSNH",
+      "label": "PENGU cluster #12",
+      "group": "PENGU cluster",
+      "note": "1.52%",
+      "alert": true
+    },
+    {
+      "address": "7pRaEufFvfw41TfG6PrWhtPriFWZ6XCa6JV4mEYTzRM3",
+      "label": "PENGU cluster #13",
+      "group": "PENGU cluster",
+      "note": "1.19%",
+      "alert": true
+    },
+    {
+      "address": "381EGwvsrPL7N22DTpto1AUeyLqhu3mhuQWzTBUgoVuD",
+      "label": "PENGU cluster #14",
+      "group": "PENGU cluster",
+      "note": "1.19%",
+      "alert": true
+    },
+    {
+      "address": "9jBmHX3QEecX8qiecXUGHH2FGbvtJfMv3VqaGYqrEdWL",
+      "label": "PENGU cluster #16",
+      "group": "PENGU cluster",
+      "note": "1.01%",
+      "alert": true
+    },
+    {
+      "address": "5VKXhq4RKorR2rvzj2fLAsGp6dQh1SaRwHTfPDrYecF9",
+      "label": "PENGU cluster #21",
+      "group": "PENGU cluster",
+      "note": "0.87%",
+      "alert": true
+    },
+    {
+      "address": "5u5kS9aEVtC46pvVMX1su52TbsTo4HepPHAiSrpGdy4v",
+      "label": "PENGU cluster #22",
+      "group": "PENGU cluster",
+      "note": "0.87%",
+      "alert": true
+    },
+    {
+      "address": "DLRYsWUH2ZqysRsTZDA6JxmDVcUorpzUFyvpuFZvtaQL",
+      "label": "PENGU cluster #23",
+      "group": "PENGU cluster",
+      "note": "0.82%",
+      "alert": true
+    },
+    {
+      "address": "GW7F1D9tG7pcJ8TwxsCoUGu2sA4MXCFDhVrikbdmX5Re",
+      "label": "PENGU cluster #24",
+      "group": "PENGU cluster",
+      "note": "0.80%",
+      "alert": true
+    },
+    {
+      "address": "GEYJYuU187w6vRfJ3iWqh4fiPvJuZhRrWhxjxQc61TK",
+      "label": "PENGU cluster #27",
+      "group": "PENGU cluster",
+      "note": "0.63%",
+      "alert": true
+    },
+    {
+      "address": "D3tthti8HWYeXcAXggT1aKYrex6T2ZDqioUYWHW4LzGU",
+      "label": "PENGU cluster #29",
+      "group": "PENGU cluster",
+      "note": "0.58%",
+      "alert": true
+    },
+    {
+      "address": "3pWnzLEhJwJ7oEqYkS1W8AYwTc5wQLGtNAM58qtoKjSo",
+      "label": "PENGU cluster #36",
+      "group": "PENGU cluster",
+      "note": "0.39%",
+      "alert": true
+    },
+    {
+      "address": "FYMCMLm9y3HvN9om1y7xHcuXhxwN4FSSjrkF15tgZi3q",
+      "label": "PENGU cluster #37",
+      "group": "PENGU cluster",
+      "note": "0.38%",
+      "alert": true
+    },
+    {
+      "address": "7J1nBkBUbavtEqgu7E1KwXBmxZyhs1xYkCHZxGLFhzTo",
+      "label": "PENGU cluster #38",
+      "group": "PENGU cluster",
+      "note": "0.38%",
+      "alert": true
+    },
+    {
+      "address": "51yZyDSnec4xnUv7XLRVYcDyV4x3wUtzrDcRaYbmQU5j",
+      "label": "PENGU whale #4 (unlabelled)",
+      "group": "PENGU whales",
+      "note": "4.55% - biggest unidentified holder",
+      "alert": true
+    },
+    {
+      "address": "3XT1PNGE2mC31WSxY4jkEcVDLXGovReFEHzvaHm7SgtS",
+      "label": "PENGU whale #6 (unlabelled)",
+      "group": "PENGU whales",
+      "note": "3.8%",
+      "alert": true
     }
   ],
   "levels": [
@@ -222,5 +355,24 @@
       "note": "Wintermute wallet historically pushed to 0.069-0.071 then sold"
     }
   ],
-  "_levels_note": "Price zones you care about. Alerts fire when price is inside low-high. Add as many as you like."
+  "_levels_note": "Price zones you care about. Alerts fire when price is inside low-high. Add as many as you like.",
+  "exchanges": {
+    "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM": "Binance 3",
+    "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": "Binance 2",
+    "3gd3dqgtJ4jWfBfLYTX67DALFetjc5iS72sCgRhCkW2u": "Binance 10",
+    "38xCLm9kSExfGU1GdyVuX4vop7SZns9kU2mQyTmmMdUP": "Binance cold",
+    "5PLU3MB93miiNvd1dcY6VkWSzjeGBQpssqbbBJDALrkm": "Upbit",
+    "8Mm46CsqxiyAputDUp2cXHg41HE3BfynTeMBDwzrMZQH": "Bithumb",
+    "Gem2VAypSg7Ai7vjDKPTtqFahpoQWkfgVkyzx3rPoTka": "Bybit 14",
+    "CBEADkb8TZAXHjVE3zwad4L995GZE7rJcacJ7asebkVG": "OKX cold",
+    "3LzmBquLMap6ak2ofyeDbH99VhJ84k336RJzkLBwq3b1": "OKX cold 2",
+    "EFE3j1pcSP1paUzA86zW7989ZjsFP2J7ginyUqo4ewqR": "Kraken cold",
+    "E2RvJg2myWpKcbkhBuF81gfhYr6KvmNcDbSmr5qnatYy": "Kraken cold 2",
+    "6LY1JzAFVZsP2a2xKrtU6znQMQ5h4i7tocWdgrkZzkzF": "Kraken hot",
+    "4xLpwxgYuPwPvtQjE94RLS4WZ4aD8NJYYKr2AJk99Qdg": "Robinhood",
+    "u6PJ8DtQuPFnfmwHbGFULQ4u4EgjDiyYKjVEsynXq2w": "Gate",
+    "3B7XAQrLoEMDEGvX8569F9GRb9PcXXocJmj5wvhhei9z": "BtcTurk",
+    "6FEVkH17P9y8Q9aCkDdPcMDjvj7SVxrTETaYEm8f51Jy": "Crypto.com"
+  },
+  "_exchanges_note": "Exchange wallets (labels from Solscan). A tracked wallet sending tokens here is flagged '-> exchange' and alerted."
 }
