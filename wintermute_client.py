@@ -32,7 +32,19 @@ WINTERMUTE_WALLETS = {
     "0xdbf5e9c5206d0db70a90108bf936da60221dc080": "Wintermute: 0xdbf...080",
     "0x000002cba8dfb0a86a47a415592835e17fac080a": "Wintermute 2",
     "0x4f3a120e72c76c22ae802d129f599bfdbc31cb81": "Wintermute: Multisig",
+    "0xf8191d98ae98d2f7abdfb63a9b0b812b93c873aa": "Wintermute 4",
 }
+
+# Add more without code changes: Railway variable WINTERMUTE_EXTRA_WALLETS
+# e.g. "0xabc...:Meme bot 1,0xdef...:Meme bot 2" (label optional)
+for _item in os.getenv("WINTERMUTE_EXTRA_WALLETS", "").split(","):
+    _addr, _, _label = _item.strip().partition(":")
+    if _addr.lower().startswith("0x") and len(_addr) == 42:
+        WINTERMUTE_WALLETS[_addr.lower()] = _label.strip() or f"Extra {_addr[:6]}…{_addr[-4:]}"
+
+# Tokens that are never "meme" side of a swap
+MAJORS = {"ETH", "WETH", "WBTC", "CBBTC", "STETH", "WSTETH", "WEETH", "RETH"} | {
+    "USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDE", "PYUSD", "USDS"}
 
 # Exchange hot wallets - verify labels on Etherscan before adding.
 KNOWN_EXCHANGES = {
@@ -192,6 +204,14 @@ class WintermuteAnalyzer:
             if tx.get("isError") == "1" or int(tx["value"]) == 0:
                 continue
             rows.append(self._row(tx, "ETH", int(tx["value"]) / 1e18, wallet, "eth"))
+        try:
+            internal = self.es.get(action="txlistinternal", **common) or []
+        except RuntimeError:
+            internal = []
+        for tx in internal:
+            if tx.get("isError") == "1" or int(tx.get("value") or 0) == 0:
+                continue
+            rows.append(self._row(tx, "ETH", int(tx["value"]) / 1e18, wallet, "eth"))
         for tx in self.es.get(action="tokentx", **common) or []:
             dec = int(tx.get("tokenDecimal") or 0)
             amt = int(tx["value"]) / (10 ** dec) if dec else float(tx["value"])
@@ -230,7 +250,7 @@ class WintermuteAnalyzer:
             self._price_rows(rows)
             rows.sort(key=lambda r: -r["ts"])
             return {"rows": rows, "latest_block": latest}
-        return cached(f"transfers:{hours}", 300, fetch)
+        return cached(f"transfers:{hours}:{','.join(sorted(self.wallets))}", 300, fetch)
 
     def _price_rows(self, rows):
         contracts = {r["contract"] for r in rows if r["contract"] != "eth"}
@@ -242,6 +262,54 @@ class WintermuteAnalyzer:
             r["usd"] = r["amount"] * p if p else None
             md = prices.get(r["contract"]) or {}
             r["market_cap"] = md.get("usd_market_cap")
+
+    # ---------- DEX swaps ----------
+    def dex_trades(self, rows, max_mcap=2_000_000_000):
+        """A swap = one wallet, one tx hash, token(s) out AND a different token in."""
+        by_tx = defaultdict(list)
+        for r in rows:
+            if not r["internal"]:
+                by_tx[(r["hash"], r["wallet"])].append(r)
+        trades = []
+        for (h, w), legs in by_tx.items():
+            ins = [l for l in legs if l["direction"] == "IN"]
+            outs = [l for l in legs if l["direction"] == "OUT"]
+            if not ins or not outs:
+                continue
+            got, gave = max(ins, key=lambda l: l["usd"] or 0), max(outs, key=lambda l: l["usd"] or 0)
+            if got["contract"] == gave["contract"]:
+                continue
+            got_major, gave_major = got["symbol"] in MAJORS, gave["symbol"] in MAJORS
+            if got_major and gave_major:
+                continue  # ETH<->stable etc, not a meme trade
+            if not got_major and (gave_major or (got["market_cap"] or 0) <= (gave["market_cap"] or 0)):
+                side, meme, other = "BUY", got, gave
+            else:
+                side, meme, other = "SELL", gave, got
+            mcap = meme["market_cap"]
+            if mcap is not None and mcap > max_mcap:
+                continue
+            usd = meme["usd"] or other["usd"]
+            trades.append({
+                "ts": meme["ts"], "hash": h, "wallet": w, "wallet_label": meme["wallet_label"],
+                "side": side, "symbol": meme["symbol"], "contract": meme["contract"],
+                "amount": meme["amount"], "paid_symbol": other["symbol"], "paid_amount": other["amount"],
+                "usd": usd, "price": (usd / meme["amount"]) if usd and meme["amount"] else meme["price"],
+                "market_cap": mcap, "venue": meme["counterparty"],
+            })
+        trades.sort(key=lambda t: -t["ts"])
+        per_token = defaultdict(lambda: {"symbol": "", "contract": "", "buys": 0, "sells": 0,
+                                         "buy_usd": 0.0, "sell_usd": 0.0, "market_cap": None})
+        for t in trades:
+            p = per_token[t["contract"]]
+            p.update(symbol=t["symbol"], contract=t["contract"], market_cap=t["market_cap"])
+            k = "buy" if t["side"] == "BUY" else "sell"
+            p[k + "s"] += 1
+            p[k + "_usd"] += t["usd"] or 0
+        summary = sorted(per_token.values(), key=lambda p: -(p["buy_usd"] + p["sell_usd"]))
+        for p in summary:
+            p["net_usd"] = p["buy_usd"] - p["sell_usd"]
+        return {"trades": trades[:300], "tokens": summary[:50]}
 
     # ---------- flows summary ----------
     def flow_summary(self, rows):

@@ -80,6 +80,7 @@
   <button data-t="holdings">Holdings</button>
   <button data-t="patterns">Patterns</button>
   <button data-t="signals">Signals</button>
+  <button data-t="dex">DEX trades</button>
   <button data-t="listing">Listing watch</button>
   <button data-t="live">Live feed</button>
 </nav>
@@ -100,6 +101,19 @@
       <button onclick="loadSignals()">Run</button>
     </div>
     <div id="signals-body"><div class="loading">Click Run to scan (uses several API calls).</div></div>
+  </section>
+  <section class="tab" id="t-dex">
+    <div class="controls" style="margin:0 0 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      Max meme mcap
+      <select id="dex-mcap">
+        <option value="10000000">$10M</option><option value="100000000">$100M</option>
+        <option value="500000000">$500M</option><option value="2000000000" selected>$2B</option>
+      </select>
+      <input id="dex-addr" placeholder="Optional: paste any 0x address to analyse its swaps"
+        style="flex:1;min-width:280px;background:#0d1117;color:inherit;border:1px solid #30363d;border-radius:6px;padding:6px 10px">
+      <button onclick="loadDex()">Run</button>
+    </div>
+    <div id="dex-body"><div class="loading">Loading…</div></div>
   </section>
   <section class="tab" id="t-listing"><div class="loading">Loading…</div></section>
   <section class="tab" id="t-live">
@@ -159,7 +173,7 @@ function load(t) {
   if (loaded[t]) return;
   loaded[t] = true;
   ({overview: loadOverview, holdings: loadHoldings, patterns: loadPatterns,
-    listing: loadListing, live: startLive})[t]?.();
+    listing: loadListing, dex: loadDex, live: startLive})[t]?.();
 }
 function refresh() {
   Object.keys(loaded).forEach(k => { if (k !== 'live') delete loaded[k]; });
@@ -276,6 +290,38 @@ async function loadSignals() {
         || '<tr><td colspan=8 class="dim">Nothing matches. Wintermute rarely accumulates tokens this small; try a higher ceiling.</td></tr>'}
       </table>
       <p class="note">Stop = 2× daily volatility (5–40%). Max size keeps you under 0.5% of DEX liquidity.</p></div>`;
+  } catch (e) { fail(el, e); }
+}
+
+// ---------- DEX trades ----------
+async function loadDex() {
+  const el = $('#dex-body');
+  const addr = $('#dex-addr').value.trim();
+  el.innerHTML = '<div class="loading">Scanning swaps' + (addr ? ' for ' + short(addr) : '') + '…</div>';
+  try {
+    const q = `hours=${$('#hours').value}&max_mcap=${$('#dex-mcap').value}` + (addr ? `&address=${encodeURIComponent(addr)}` : '');
+    const d = await api('/api/wintermute/dex-trades?' + q);
+    const amt = v => v == null ? '–' : v >= 1e6 ? (v/1e6).toFixed(2) + 'M' : v >= 1e3 ? (v/1e3).toFixed(1) + 'k' : (+v).toPrecision(4);
+    const side = s => `<b style="color:${s === 'BUY' ? '#2ecc71' : '#ff5c5c'}">${s}</b>`;
+    el.innerHTML = `
+      <div class="card"><h3>By token${d.address ? ' · ' + short(d.address) : ''} (click for price impact)</h3>
+      <table><tr><th>Token</th><th>Buys</th><th>Sells</th><th>Bought</th><th>Sold</th><th>Net USD</th><th>Mcap</th></tr>
+      ${d.tokens.map(p => `<tr class="click" onclick="showImpact('${p.contract}')"><td>${p.symbol}</td>
+        <td>${p.buys}</td><td>${p.sells}</td><td>${usd(p.buy_usd)}</td><td>${usd(p.sell_usd)}</td>
+        <td style="color:${p.net_usd >= 0 ? '#2ecc71' : '#ff5c5c'}">${usd(p.net_usd)}</td><td>${usd(p.market_cap)}</td></tr>`).join('')
+        || '<tr><td colspan=7 class="dim">No meme swaps in this window</td></tr>'}
+      </table></div>
+      <div class="card"><h3>Swaps</h3>
+      <table><tr><th>Time</th><th>Side</th><th>Token</th><th>Amount</th><th>Paid / received</th><th>USD</th><th>Price</th><th>Wallet</th><th>Pool / router</th><th>Tx</th></tr>
+      ${d.trades.map(t => `<tr><td>${time(t.ts)}</td><td>${side(t.side)}</td><td>${t.symbol}</td>
+        <td>${amt(t.amount)}</td><td>${amt(t.paid_amount)} ${t.paid_symbol}</td><td>${usd(t.usd)}</td>
+        <td>${t.price ? '$' + (+t.price).toPrecision(4) : '–'}</td><td>${t.wallet_label}</td>
+        <td><a class="tx" target="_blank" href="https://etherscan.io/address/${t.venue}">${short(t.venue)}</a></td>
+        <td>${txl(t.hash)}</td></tr>`).join('')
+        || '<tr><td colspan=10 class="dim">None</td></tr>'}
+      </table></div>
+      <div class="dim">Swaps = a tracked wallet sent one token and received another in the same transaction.
+        ETH/stables/WBTC/stETH legs are treated as the payment side. Unknown market cap is shown (often very new tokens).</div>`;
   } catch (e) { fail(el, e); }
 }
 

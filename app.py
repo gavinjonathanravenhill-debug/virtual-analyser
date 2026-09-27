@@ -58,6 +58,24 @@ def _wintermute_auth():
 
 
 app.register_blueprint(wintermute_bp)
+
+# ---- Solana wallet tracker (/solana) - also behind the site password ----
+from solana_routes import solana_bp
+
+
+@solana_bp.before_request
+def _solana_auth():
+    auth = request.authorization
+    if not auth or not check_auth(auth.password):
+        return Response("Login required", 401, {"WWW-Authenticate": "Basic realm=\"Virtual Analyser\""})
+
+
+app.register_blueprint(solana_bp)
+try:
+    from solana_client import start_solana
+    start_solana()
+except Exception as _e:
+    print(f"solana tracker failed to start, continuing: {_e}")
 try:
     start_realtime()
 except Exception as _e:

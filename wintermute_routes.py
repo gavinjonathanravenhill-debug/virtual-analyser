@@ -114,3 +114,20 @@ def stream():
 @wintermute_bp.route("/api/wintermute/stream/status")
 def stream_status():
     return jsonify(bus.status)
+
+
+@wintermute_bp.route("/api/wintermute/dex-trades")
+def dex_trades():
+    max_mcap = float(request.args.get("max_mcap", 2_000_000_000))
+    addr = (request.args.get("address") or "").strip().lower()
+
+    def run():
+        if addr:  # analyse any address you paste in
+            if not (addr.startswith("0x") and len(addr) == 42):
+                raise ValueError("Not a valid 0x address")
+            a = WintermuteAnalyzer({addr: "Lookup " + addr[:6] + "…" + addr[-4:]})
+            t = a.transfers(_hours())
+            return {**a.dex_trades(t["rows"], max_mcap), "address": addr}
+        t = wm().transfers(_hours())
+        return wm().dex_trades(t["rows"], max_mcap)
+    return _safe(run)
