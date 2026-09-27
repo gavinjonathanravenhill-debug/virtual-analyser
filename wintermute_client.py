@@ -13,6 +13,7 @@ Everything is cached in memory so the page doesn't burn API quota on refresh.
 import math
 import os
 import statistics
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -66,9 +67,17 @@ def cached(key, ttl, fn):
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < ttl:
         return hit[1]
-    val = fn()
+    try:
+        val = fn()
+    except Exception:
+        if hit:  # API busy/down: serve the last good data instead of an error
+            return hit[1]
+        raise
     _cache[key] = (time.time(), val)
     return val
+
+
+_es_lock = threading.Lock()  # one explorer request at a time across all page tabs
 
 
 # ------------------------------------------------------------ API clients --
@@ -84,11 +93,16 @@ class Etherscan:
     def get(self, **params):
         if self.key:
             params.update(chainid=self.chain_id, apikey=self.key)
-        for attempt in range(4):
-            r = self.s.get(self.url, params=params, timeout=30)
+        gap = 0.22 if self.key else 0.6  # keyless Blockscout is stricter
+        for attempt in range(6):
+            with _es_lock:
+                r = self.s.get(self.url, params=params, timeout=30)
+                time.sleep(gap)
+            if r.status_code == 429 or r.status_code >= 500:
+                time.sleep(min(2 ** attempt, 20))
+                continue
             r.raise_for_status()
             data = r.json()
-            time.sleep(0.22)  # free tier ~5 req/s
             result = data.get("result")
             if data.get("status") == "1" or "jsonrpc" in data:
                 return result
@@ -102,6 +116,9 @@ class Etherscan:
         raise RuntimeError(f"{self.name} rate limit")
 
     def latest_block(self):
+        return cached("latest_block", 30, self._latest_block)
+
+    def _latest_block(self):
         if self.key:
             return int(self.get(module="proxy", action="eth_blockNumber"), 16)
         return int(self.get(module="block", action="eth_block_number"), 16)
