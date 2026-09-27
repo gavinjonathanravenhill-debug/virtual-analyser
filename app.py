@@ -45,6 +45,11 @@ def requires_auth(f):
     return decorated
 
 
+# ---- X news feed: slide-out panel injected into every page ----
+from xfeed import init_xfeed
+init_xfeed(app, auth=requires_auth)
+
+
 # ---- Wintermute tracker (/wintermute) - whole blueprint behind the site password ----
 from wintermute_routes import wintermute_bp
 from wintermute_realtime import start_realtime
