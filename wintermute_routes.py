@@ -6,7 +6,7 @@ import queue
 from flask import (Blueprint, Response, jsonify, render_template, request,
                    stream_with_context)
 
-from wintermute_client import (KNOWN_EXCHANGES, WINTERMUTE_WALLETS,
+from wintermute_client import (KNOWN_EXCHANGES, WINTERMUTE_WALLETS, start_warmer,
                                PatternRecognition, WintermuteAnalyzer)
 from wintermute_realtime import bus, start_realtime
 
@@ -18,6 +18,7 @@ def wm():
     global _analyzer
     if _analyzer is None:
         _analyzer = WintermuteAnalyzer()
+        start_warmer()
     return _analyzer
 
 

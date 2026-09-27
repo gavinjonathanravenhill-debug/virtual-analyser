@@ -82,3 +82,13 @@ def signals():
 def insights():
     _start()
     return _safe(lambda: {"clusters": sig.clusters(), "levels": sig.level_status()})
+
+
+@solana_bp.route("/api/solana/profile")
+def profile_route():
+    import solana_profiler
+    addr = (request.args.get("address") or "").strip()
+    if not 32 <= len(addr) <= 44:
+        return jsonify({"error": "Not a Solana address"}), 400
+    depth = max(10, min(int(request.args.get("depth", 40)), 100))
+    return _safe(lambda: solana_profiler.profile(addr, depth))

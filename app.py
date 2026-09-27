@@ -58,6 +58,11 @@ def _wintermute_auth():
 
 
 app.register_blueprint(wintermute_bp)
+try:
+    from wintermute_client import start_warmer
+    start_warmer()  # pre-load Wintermute data in the background
+except Exception as _e:
+    print(f"wintermute warmer failed to start, continuing: {_e}")
 
 # ---- Solana wallet tracker (/solana) - also behind the site password ----
 from solana_routes import solana_bp

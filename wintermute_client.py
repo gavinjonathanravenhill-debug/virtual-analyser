@@ -63,18 +63,25 @@ LOW_MCAP_USD = 50_000_000    # "low market cap" flag on holdings
 _cache = {}
 
 
+_key_locks = defaultdict(threading.Lock)
+
+
 def cached(key, ttl, fn):
     hit = _cache.get(key)
     if hit and time.time() - hit[0] < ttl:
         return hit[1]
-    try:
-        val = fn()
-    except Exception:
-        if hit:  # API busy/down: serve the last good data instead of an error
+    with _key_locks[key]:  # several tabs asking at once -> one fetch, the rest wait for it
+        hit = _cache.get(key)
+        if hit and time.time() - hit[0] < ttl:
             return hit[1]
-        raise
-    _cache[key] = (time.time(), val)
-    return val
+        try:
+            val = fn()
+        except Exception:
+            if hit:  # API busy/down: serve the last good data instead of an error
+                return hit[1]
+            raise
+        _cache[key] = (time.time(), val)
+        return val
 
 
 _es_lock = threading.Lock()  # one explorer request at a time across all page tabs
@@ -133,27 +140,43 @@ class CoinGecko:
 
     def get(self, path, **params):
         for attempt in range(3):
-            r = self.s.get(f"{COINGECKO}{path}", params=params, timeout=30)
+            try:
+                r = self.s.get(f"{COINGECKO}{path}", params=params, timeout=30)
+            except requests.RequestException:
+                time.sleep(2)
+                continue
             if r.status_code == 429:
                 time.sleep(3 * (attempt + 1))
                 continue
-            if r.status_code == 404:
+            if not r.ok:  # 400/401/404 on the free tier: treat as "no data", never crash the page
                 return None
-            r.raise_for_status()
             return r.json()
         return None
 
     def token_prices(self, contracts):
-        """contract -> {usd, usd_market_cap, usd_24h_vol, usd_24h_change}"""
+        """contract -> {usd, usd_market_cap, usd_24h_vol, usd_24h_change} (via DexScreener, 30 per call)"""
         out = {}
-        contracts = list(contracts)
-        for i in range(0, len(contracts), 25):
-            chunk = contracts[i:i + 25]
-            data = self.get("/simple/token_price/ethereum",
-                            contract_addresses=",".join(chunk), vs_currencies="usd",
-                            include_market_cap="true", include_24hr_vol="true",
-                            include_24hr_change="true") or {}
-            out.update({k.lower(): v for k, v in data.items()})
+        contracts = [c.lower() for c in contracts if c and c != "eth"]
+        for i in range(0, len(contracts), 30):
+            chunk = contracts[i:i + 30]
+            try:
+                r = requests.get("https://api.dexscreener.com/latest/dex/tokens/" + ",".join(chunk), timeout=20)
+                pairs = r.json().get("pairs") or []
+            except Exception:
+                continue
+            best = {}
+            for p in pairs:
+                a = ((p.get("baseToken") or {}).get("address") or "").lower()
+                liq = (p.get("liquidity") or {}).get("usd") or 0
+                if a in chunk and p.get("chainId") == "ethereum" and liq >= 1000 and \
+                        liq > ((best.get(a) or {}).get("liquidity") or {}).get("usd", 0):
+                    best[a] = p
+            for a, p in best.items():
+                mc = p.get("marketCap") or p.get("fdv")
+                out[a] = {"usd": float(p["priceUsd"]) if p.get("priceUsd") else None,
+                          "usd_market_cap": mc if mc and mc < 5e12 else None,
+                          "usd_24h_vol": (p.get("volume") or {}).get("h24"),
+                          "usd_24h_change": (p.get("priceChange") or {}).get("h24")}
         return out
 
     def eth_price(self):
@@ -256,18 +279,30 @@ class WintermuteAnalyzer:
             "internal": cp in self.wallets,
         }
 
+    BASE_HOURS = 24 * 7
+
     def transfers(self, hours=24):
-        """All transfers for all wallets over the last N hours, priced in USD."""
+        """All transfers for all wallets over the last N hours, priced in USD.
+        One 7-day download is shared by every window (6h/24h/3d/7d) and refreshed every 5 min."""
+        span = max(hours, self.BASE_HOURS)
+
         def fetch():
             latest = self.es.latest_block()
-            start = latest - int(hours * 3600 / BLOCK_SECONDS)
-            rows = []
+            start = latest - int(span * 3600 / BLOCK_SECONDS)
+            rows, errors = [], []
             for w in self.wallets:
-                rows += self.get_transactions_from_wallet(w, start, latest)
+                try:
+                    rows += self.get_transactions_from_wallet(w, start, latest)
+                except Exception as e:  # one wallet failing shouldn't blank the page
+                    errors.append(f"{self.wallets.get(w, w)}: {e}")
+            if errors and not rows:
+                raise RuntimeError("; ".join(errors))
             self._price_rows(rows)
             rows.sort(key=lambda r: -r["ts"])
-            return {"rows": rows, "latest_block": latest}
-        return cached(f"transfers:{hours}:{','.join(sorted(self.wallets))}", 300, fetch)
+            return {"rows": rows, "latest_block": latest, "errors": errors}
+        base = cached(f"transfers:{span}:{','.join(sorted(self.wallets))}", 300, fetch)
+        cutoff = time.time() - hours * 3600
+        return {**base, "rows": [r for r in base["rows"] if r["ts"] >= cutoff]}
 
     def _price_rows(self, rows):
         contracts = {r["contract"] for r in rows if r["contract"] != "eth"}
@@ -374,12 +409,27 @@ class WintermuteAnalyzer:
 
             bal = defaultdict(float)
             for w in self.wallets:
-                wei = int(self.es.get(module="account", action="balance", address=w, tag="latest"))
-                bal["eth"] += wei / 1e18
-                for c in contracts:
-                    raw = int(self.es.get(module="account", action="tokenbalance",
-                                          contractaddress=c, address=w, tag="latest") or 0)
-                    bal[c] += raw / (10 ** decimals.get(c, 18))
+                try:
+                    wei = int(self.es.get(module="account", action="balance", address=w, tag="latest"))
+                    bal["eth"] += wei / 1e18
+                    if not self.es.key:  # Blockscout: every token balance in one call
+                        for t in self.es.get(module="account", action="tokenlist", address=w) or []:
+                            if t.get("type") not in (None, "ERC-20"):
+                                continue
+                            c = (t.get("contractAddress") or "").lower()
+                            dec = int(t.get("decimals") or 18)
+                            bal[c] += int(t.get("balance") or 0) / (10 ** dec)
+                            meta.setdefault(c, (t.get("symbol") or "?").upper())
+                            decimals.setdefault(c, dec)
+                    else:  # Etherscan free tier: one call per token, so cap it
+                        for c in contracts[:15]:
+                            raw = int(self.es.get(module="account", action="tokenbalance",
+                                                  contractaddress=c, address=w, tag="latest") or 0)
+                            bal[c] += raw / (10 ** decimals.get(c, 18))
+                except Exception as e:
+                    print(f"holdings: {w} failed: {e}")
+            missing = [c for c in bal if c != "eth" and c not in prices][:120]
+            prices.update(self.cg.token_prices(missing))
 
             holdings = []
             for c, amt in bal.items():
@@ -555,9 +605,9 @@ class WintermuteAnalyzer:
             if h["symbol"] in STABLES or h["contract"] == "eth":
                 continue
             on_binance = (h["symbol"] in listed) if listed is not None else None
-            if on_binance:
-                continue
-            info = self.cg.token_info(h["contract"])
+            if on_binance or h["contract"] not in acc:
+                continue  # only look up supply (slow CoinGecko call) for tokens being accumulated
+            info = cached(f"cginfo:{h['contract']}", 3600, lambda c=h["contract"]: self.cg.token_info(c))
             supply = info.get("circulating_supply") or info.get("total_supply")
             pct = h["amount"] / supply * 100 if supply else None
             p = acc.get(h["contract"])
@@ -673,3 +723,27 @@ class PatternRecognition:
     def run(self, rows):
         return {"accumulation": self.detect_accumulation(rows),
                 "distribution": self.detect_distribution(rows)}
+
+
+# ------------------------------------------------------------- warmer -----
+_warm_started = False
+
+
+def start_warmer(interval=240):
+    """Keep the shared 7-day data fresh in the background so page loads are instant."""
+    global _warm_started
+    if _warm_started:
+        return
+    _warm_started = True
+
+    def loop():
+        a = None
+        while True:
+            try:
+                a = a or WintermuteAnalyzer()
+                a.transfers(24)
+                a.analyze_token_holdings()
+            except Exception as e:
+                print(f"wintermute warmer: {e}")
+            time.sleep(interval)
+    threading.Thread(target=loop, daemon=True, name="wintermute-warmer").start()

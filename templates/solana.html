@@ -82,6 +82,7 @@
 
 <nav id="tabs">
   <button data-t="feed" class="on">Feed</button>
+  <button data-t="profile">Wallet profiler</button>
   <button data-t="signals">Signals</button>
   <button data-t="wallets">Wallets</button>
   <button data-t="lookup">Lookup</button>
@@ -106,6 +107,18 @@
     <div class="card"><table id="feed-table"><tr><td class="dim l">Loading…</td></tr></table></div>
     <div class="note">Checks every wallet every few minutes using Solana's free public RPC, so it builds up history from when the server started (last ~15 transactions per wallet on the first pass).
       BUY/SELL = token swapped against SOL/USDC/USDT. IN/OUT = plain transfer. Price is what they actually paid.</div>
+  </section>
+
+  <section class="tab" id="t-profile">
+    <div class="controls" style="margin:0 0 12px;flex-wrap:wrap">
+      <input id="pf-addr" placeholder="Paste any Solana wallet address" style="flex:1;min-width:320px"
+        onkeydown="if(event.key==='Enter')runProfile()">
+      <select id="pf-depth" title="How many recent transactions to analyse in detail">
+        <option value="25">Quick (25 txs)</option><option value="40" selected>Normal (40 txs)</option><option value="80">Deep (80 txs)</option></select>
+      <button onclick="runProfile()">Profile wallet</button>
+    </div>
+    <div id="pf-body"><div class="dim">Tells you what a wallet is, what it holds, and which manipulation pattern its behaviour matches best.
+      Takes 20-60s on the free Solana RPC. Heuristic - always read the evidence.</div></div>
   </section>
 
   <section class="tab" id="t-signals">
@@ -198,7 +211,7 @@ function renderWallets() {
     list.map(x => `<tr class="click ${x.alert ? 'alert' : ''}" onclick="pickWallet('${x.address}')"><td class="l">${chip(x.group)}</td><td class="l">${x.label}${x.alert ? ' 🔔' : ''}</td>
       <td class="l">${solscan('account', x.address, short(x.address))}</td><td class="l dim">${x.note || ''}</td><td title="${x.trades || 0} swaps seen">${x.median_trade ? usd(x.median_trade) : '–'}</td><td>${ago(x.last_seen)}</td>
       <td>${x.last_tx ? ago(x.last_tx) : x.checked ? '<span class="err" title="No transactions at all - probably a mistyped character">⚠ none – check address</span>' : '<span class="dim">scanning…</span>'}</td>
-      <td class="dim">view →</td></tr>`).join('');
+      <td><a href="#" class="tx" onclick="event.stopPropagation();profileWallet('${x.address}');return false">profile</a> · <span class="dim">feed →</span></td></tr>`).join('');
 }
 function pickWallet(a) { $('#f-wallet').value = a; $('[data-t=feed]').click(); loadFeed(); }
 
@@ -255,6 +268,66 @@ async function loadSignals() {
 }
 
 const RISK_ICON = {ok: '✅', warn: '⚠️', bad: '❌', unknown: '❔'};
+// ---------- wallet profiler ----------
+function profileWallet(a) { $('#pf-addr').value = a; $('[data-t=profile]').click(); runProfile(); }
+async function runProfile() {
+  const a = $('#pf-addr').value.trim();
+  if (!a) return;
+  const el = $('#pf-body');
+  el.innerHTML = `<div class="loading">Profiling ${short(a)}… reading history, holdings and recent trades (20-60s)</div>`;
+  try {
+    const d = await api(`/api/solana/profile?address=${encodeURIComponent(a)}&depth=${$('#pf-depth').value}`);
+    if (d.kind !== 'wallet') {
+      el.innerHTML = `<div class="warn">${d.summary}</div>` + (d.kind === 'token' ? `<button onclick="openToken('${a}')">Screen this token</button>` : '');
+      return;
+    }
+    const top = d.archetypes[0] || {};
+    const bar = v => `<div style="background:var(--line);border-radius:4px;height:8px;width:120px;display:inline-block;vertical-align:middle">
+      <div style="background:${v >= 70 ? 'var(--red)' : v >= 45 ? 'var(--amber)' : 'var(--blue)'};height:8px;border-radius:4px;width:${v}%"></div></div> ${v}`;
+    const h = d.holdings, st = d.stats, ac = d.activity;
+    const lbl = x => x.label ? `<b>${x.label}</b>` : `<span class="dim">unknown</span>`;
+    el.innerHTML = `
+      <div class="card"><h3>${d.label ? d.label + ' · ' : ''}${solscan('account', a, short(a))}
+          <a class="tx" target="_blank" href="https://solscan.io/account/${a}#portfolio" style="margin-left:8px">portfolio ↗</a></h3>
+        <div style="font-size:16px;margin:4px 0 8px">${d.summary}</div>
+        ${d.note ? `<div class="note">${d.note}</div>` : ''}
+        ${d.linked_to_your_wallets.length ? `<div class="warn">🔗 Interacted with your tracked wallets: ${d.linked_to_your_wallets.map(c => c.label.replace('Your list: ', '') + ` (${c.count}x)`).join(', ')}</div>` : ''}
+      </div>
+      <div class="tiles">
+        <div class="tile"><div class="k">Total value</div><div class="v">${usd(h.total_usd)}</div><div class="dim">${h.sol.toFixed(2)} SOL + ${h.token_count} tokens</div></div>
+        <div class="tile"><div class="k">Activity</div><div class="v">${st.tx_per_hour >= 1 ? st.tx_per_hour.toFixed(0) : st.tx_per_hour.toFixed(2)}/h</div><div class="dim">${ac.tx_seen}${ac.complete_history ? '' : '+'} txs</div></div>
+        <div class="tile"><div class="k">Wallet age</div><div class="v">${ac.first_seen ? ago(ac.first_seen).replace(' ago', '') : '> ' + ago(ac.oldest_scanned).replace(' ago', '')}</div><div class="dim">last active ${ago(ac.last_seen)}</div></div>
+        <div class="tile"><div class="k">Typical trade</div><div class="v">${usd(st.median_trade_usd)}</div><div class="dim">${st.buys} buys / ${st.sells} sells</div></div>
+        <div class="tile"><div class="k">Funded by</div><div class="v" style="font-size:14px">${d.funder ? (d.funder.label || short(d.funder.address || '')) : '<span class="dim">too much history</span>'}</div>
+          <div class="dim">${d.funder && d.funder.address ? `<a href="#" class="tx" onclick="profileWallet('${d.funder.address}');return false">profile funder →</a>` : ''}</div></div>
+      </div>
+      <div class="grid2">
+        <div class="card"><h3>What it most likely is</h3>
+          <table>${d.archetypes.map((x, i) => `<tr><td class="l" style="white-space:normal"><b>${x.name}</b>
+            ${x.evidence.length ? '<div class="dim" style="font-size:12px">' + x.evidence.join(' · ') + '</div>' : ''}</td><td>${bar(x.score)}</td></tr>`).join('')}</table></div>
+        <div class="card"><h3>⚠️ Most likely market manipulation</h3>
+          <div style="white-space:normal;margin-bottom:10px">${d.manipulation}</div>
+          <div class="dim" style="font-size:12px">Round trips ≤2min: ${st.round_trips} (same block: ${st.same_block}) · Jito-tipped: ${(st.jito_share * 100).toFixed(0)}% ·
+            Failed: ${(st.fail_share * 100).toFixed(0)}% · Tokens traded: ${st.tokens_traded}</div>
+          <div class="dim" style="font-size:12px;margin-top:6px">Venues: ${st.programs.map(p => p[0] + ' ×' + p[1]).join(', ') || '–'}</div>
+          <div class="note">Scores are pattern matches on the last ${d.recent.length ? 'scanned' : ''} transactions, not proof.</div></div>
+      </div>
+      <div class="card"><h3>Holdings (${h.priced} priced of ${h.token_count})</h3>
+        <table><tr><th class="l">Token</th><th>Amount</th><th>Value</th><th>% of wallet</th><th>Mcap</th><th class="l">Flag</th></tr>
+        <tr><td class="l">SOL</td><td>${h.sol.toFixed(3)}</td><td>${usd(h.sol_usd)}</td><td>${h.total_usd ? (h.sol_usd / h.total_usd * 100).toFixed(1) + '%' : '–'}</td><td>–</td><td></td></tr>
+        ${h.tokens.slice(0, 40).map(t => `<tr class="click" onclick="openToken('${t.mint}')"><td class="l">${t.symbol} 🔍</td><td>${amt(t.amount)}</td><td>${usd(t.usd)}</td>
+          <td>${t.pct ? t.pct.toFixed(1) + '%' : '–'}</td><td>${usd(t.market_cap)}</td><td class="l ${t.flag ? 'neg' : ''}">${t.flag}</td></tr>`).join('')}
+        </table>${h.tokens.length > 40 ? `<div class="note">+ ${h.tokens.length - 40} more (mostly dust)</div>` : ''}</div>
+      <div class="grid2">
+        <div class="card"><h3>Top counterparties</h3><table><tr><th class="l">Address</th><th class="l">Known as</th><th>Txs</th><th></th></tr>
+          ${d.counterparties.map(c => `<tr><td class="l">${solscan('account', c.address, short(c.address))}</td><td class="l">${lbl(c)}</td><td>${c.count}</td>
+            <td><a href="#" class="tx" onclick="profileWallet('${c.address}');return false">profile</a></td></tr>`).join('') || '<tr><td class="dim l">None</td></tr>'}</table>
+          <div class="note">Mostly pools/routers for traders; for distributors these are the wallets it feeds.</div></div>
+        <div class="card"><h3>Recent activity</h3><table>${head(false)}${d.recent.slice(0, 20).map(e => row(e, false)).join('') || '<tr><td class="dim l">None</td></tr>'}</table></div>
+      </div>`;
+  } catch (e) { el.innerHTML = `<div class="card err">Error: ${e.message}</div>`; }
+}
+
 // ---------- token screener ----------
 const btn = (href, text) => `<a href="${href}" target="_blank" style="text-decoration:none"><button>${text}</button></a>`;
 async function openToken(mint) {
