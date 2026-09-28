@@ -97,6 +97,7 @@
       <div class="card" id="clusters"><h3>🫧 Cluster buys (2+ of your wallets, 72h)</h3><div class="dim">Waiting for data…</div></div>
       <div class="card" id="levels"><h3>🎯 Your price zones</h3><div class="dim">Loading…</div></div>
     </div>
+    <div class="card" id="netflow"><h3>📊 Net exchange flow by token</h3><div class="dim">Loading…</div></div>
     <div class="card" id="alerts"><h3>Key wallet moves (🔔 wallets)</h3><div class="dim">Waiting for first scan…</div></div>
     <div class="controls" style="margin:0 0 12px;flex-wrap:wrap">
       <select id="f-group"><option value="">All groups</option></select>
@@ -330,6 +331,24 @@ async function loadInsights() {
   } catch (e) { $('#clusters').innerHTML = `<div class="err">Error: ${e.message}</div>`; }
 }
 
+// ---------- net exchange flow (+ = pulled off exchanges, - = sent to exchanges) ----------
+let nfHours = 24;
+async function loadNetflow(h) {
+  if (h) nfHours = h;
+  const sgn = v => (v > 0 ? '+' : v < 0 ? '-' : '') + usd(Math.abs(v || 0));
+  const hdr = '<h3>📊 Net exchange flow by token</h3><div class="controls" style="margin-bottom:8px">' +
+    [1, 24, 168].map(x => `<button class="${x === nfHours ? 'on' : ''}" onclick="loadNetflow(${x})">${x === 168 ? '7d' : x + 'h'}</button>`).join(' ') + '</div>';
+  try {
+    const d = await api(`${API}/netflow?hours=${nfHours}`);
+    $('#netflow').innerHTML = hdr + (d.rows.length ? '<table><tr><th class="l">Token</th><th>Net</th><th>Off exch</th><th>Onto exch</th><th>% mcap</th><th>Moves</th><th>Last</th></tr>' +
+      d.rows.map(r => `<tr class="click" onclick="openToken('${r.mint}')" title="${(r.wallets || '').replace(/"/g, '')} · ${(r.venues || '').replace(/"/g, '')}">
+        <td class="l">${r.symbol || short(r.mint)}</td><td class="${r.net_usd > 0 ? 'pos' : r.net_usd < 0 ? 'neg' : ''}"><b>${sgn(r.net_usd)}</b></td>
+        <td>${usd(r.off_usd)}</td><td>${usd(r.on_usd)}</td><td>${r.pct_mcap == null ? '–' : r.pct_mcap.toFixed(3) + '%'}</td><td>${r.n}</td><td>${ago(r.last)}</td></tr>`).join('') + '</table>'
+      : '<div class="dim">No exchange moves by your wallets in this window yet.</div>') +
+      `<div class="dim" style="margin-top:6px">+ = pulled off exchanges (restocking / accumulating), − = sent to exchanges (likely sell). Telegram alert when 24h net passes ${usd(d.alert_usd)} or ${d.alert_pct}% of mcap (min ${usd(d.alert_floor)}), and again each time it doubles.</div>`;
+  } catch (e) { $('#netflow').innerHTML = hdr + `<div class="err">Error: ${e.message}</div>`; }
+}
+
 function zoneForm(mint = '', price = null) {
   const v = id => (document.getElementById(id) || {}).value || '';
   return `<div class="controls" style="margin-top:10px;flex-wrap:wrap;gap:6px">
@@ -513,7 +532,7 @@ async function runLookup() {
 
 async function refresh() {
   try { await loadWallets(); } catch (e) { $('#status').textContent = 'Error: ' + e.message; }
-  loadFeed(); loadInsights();
+  loadFeed(); loadInsights(); loadNetflow();
   if ($('#t-signals').classList.contains('on')) loadSignals();
 }
 refresh();

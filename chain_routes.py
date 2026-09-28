@@ -84,6 +84,14 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
         return safe(lambda: {"journal": sig.journal(m), "scorecard": sig.scorecard(m),
                              "min_usd": sig.MIN_USD, "db": sig.DB_PATH})
 
+    @bp.route(f"{api}/netflow")
+    def netflow():
+        start()
+        hours = max(1, min(float(request.args.get("hours", 24)), 24 * 7))
+        return safe(lambda: {"hours": hours, "rows": sig.net_flows(m, hours)[:100],
+                             "alert_usd": sig.FLOW_ALERT_USD, "alert_pct": sig.FLOW_ALERT_PCT,
+                             "alert_floor": sig.FLOW_ALERT_FLOOR})
+
     @bp.route(f"{api}/insights")
     def insights():
         start()

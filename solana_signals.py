@@ -54,6 +54,12 @@ def init_db():
             created INTEGER, PRIMARY KEY (chain, address))""")
         if "min_usd" not in [r[1] for r in c.execute("PRAGMA table_info(wallets)")]:
             c.execute("ALTER TABLE wallets ADD COLUMN min_usd REAL")
+        c.execute("""CREATE TABLE IF NOT EXISTS flows (
+            chain TEXT, sig TEXT, wallet TEXT, mint TEXT, ts INTEGER, symbol TEXT, label TEXT, grp TEXT,
+            venue TEXT, usd REAL, sign INTEGER, market_cap REAL, PRIMARY KEY (chain, sig, wallet, mint))""")
+        c.execute("CREATE INDEX IF NOT EXISTS flows_mint_ts ON flows (chain, mint, ts)")
+        c.execute("""CREATE TABLE IF NOT EXISTS flow_alerts (
+            chain TEXT, mint TEXT, sign INTEGER, bucket INTEGER, ts INTEGER, PRIMARY KEY (chain, mint, sign))""")
 
 
 # --------------------------------------------------------------- chains ----
@@ -178,12 +184,109 @@ def is_signal(e, m):
     return usd >= (floor or MIN_USD)
 
 
+# ------------------------------------------------------ net exchange flow ---
+# Every exchange withdrawal / deposit by a tracked wallet is stored, then summed per token over a
+# rolling window.  + = pulled OFF exchanges (restocking / accumulating), - = sent TO exchanges (likely sell).
+FLOW_ALERT_USD = float(os.getenv("FLOW_ALERT_USD", "250000"))      # alert when 24h net passes this...
+FLOW_ALERT_PCT = float(os.getenv("FLOW_ALERT_PCT", "0.05"))        # ...or this % of market cap
+FLOW_ALERT_FLOOR = float(os.getenv("FLOW_ALERT_FLOOR", "25000"))   # but never below this (small caps)
+FLOW_WINDOWS = {"1h": 3600, "24h": 86400}
+
+
+def record_flows(events, m):
+    rows = []
+    for e in events:
+        if not (e.get("to_exchange") or e.get("from_exchange")):
+            continue
+        if e.get("mint") in (None, m.NATIVE) or e["mint"] in m.QUOTES or not e.get("usd"):
+            continue
+        rows.append((m.CHAIN, e["sig"], e["wallet"], e["mint"], int(e.get("ts") or time.time()), e.get("symbol"),
+                     e.get("label"), e.get("group"), e.get("counterparty_label"), float(e["usd"]),
+                     1 if e.get("from_exchange") else -1, e.get("market_cap")))
+    if rows:
+        with _db_lock, db() as c:
+            c.executemany("INSERT OR IGNORE INTO flows VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    return {r[3] for r in rows}
+
+
+def net_flows(m, hours=24, mint=None):
+    """Per token: net USD pulled off (+) / sent to (-) exchanges by your tracked wallets."""
+    since = int(time.time() - hours * 3600)
+    q = """SELECT mint, MAX(symbol) symbol, SUM(usd*sign) net_usd,
+                  SUM(CASE WHEN sign>0 THEN usd ELSE 0 END) off_usd, SUM(CASE WHEN sign<0 THEN usd ELSE 0 END) on_usd,
+                  COUNT(*) n, MAX(ts) last, GROUP_CONCAT(DISTINCT label) wallets, GROUP_CONCAT(DISTINCT venue) venues
+           FROM flows WHERE chain=? AND ts>=?""" + (" AND mint=?" if mint else "") + " GROUP BY mint"
+    with _db_lock, db() as c:
+        rows = [dict(r) for r in c.execute(q, (m.CHAIN, since, mint) if mint else (m.CHAIN, since))]
+        caps = {r["mint"]: r["market_cap"] for r in c.execute(
+            "SELECT mint, market_cap, MAX(ts) FROM flows WHERE chain=? AND market_cap IS NOT NULL AND ts>=? "
+            "GROUP BY mint", (m.CHAIN, since))}
+    for r in rows:
+        r["market_cap"] = caps.get(r["mint"])
+        r["pct_mcap"] = r["net_usd"] / r["market_cap"] * 100 if r["market_cap"] else None
+    return sorted(rows, key=lambda r: -abs(r["net_usd"] or 0))
+
+
+def flow_line(m, mint, symbol=None):
+    """One-line rolling summary for an alert, e.g. 'PENGU net off-exchange: 1h +$56k · 24h +$410k (7 moves)'."""
+    parts, n24, pct = [], 0, None
+    for w, secs in FLOW_WINDOWS.items():
+        r = (net_flows(m, secs / 3600, mint) or [{}])[0]
+        v = r.get("net_usd") or 0
+        parts.append(f"{w} {'+' if v >= 0 else '-'}{fmt_usd(abs(v))}")
+        if w == "24h":
+            n24 = r.get("n") or 0
+            pct = r.get("pct_mcap")
+    tail = f" ({n24} move{'s' if n24 != 1 else ''}" + (f", {pct:+.3f}% mcap)" if pct is not None else ")")
+    return f"📊 {symbol or mint[:6]} net off-exchange: " + " · ".join(parts) + tail
+
+
+def _flow_threshold(mcap):
+    t = FLOW_ALERT_USD
+    if mcap:
+        t = min(t, max(FLOW_ALERT_FLOOR, mcap * FLOW_ALERT_PCT / 100))
+    return t
+
+
+def check_flow_alerts(m, mints):
+    """Alert when a token's 24h net flow crosses the threshold - again each time it doubles."""
+    for mint in mints:
+        r = (net_flows(m, 24, mint) or [None])[0]
+        if not r or not r["net_usd"]:
+            continue
+        net, t = r["net_usd"], _flow_threshold(r.get("market_cap"))
+        if abs(net) < t:
+            continue
+        sign, bucket = (1 if net > 0 else -1), int(abs(net) // t).bit_length()   # 1x, 2x, 4x, 8x...
+        with _db_lock, db() as c:
+            prev = c.execute("SELECT bucket, ts FROM flow_alerts WHERE chain=? AND mint=? AND sign=?",
+                             (m.CHAIN, mint, sign)).fetchone()
+            if prev and prev["bucket"] >= bucket and time.time() - prev["ts"] < 86400:
+                continue
+            c.execute("INSERT OR REPLACE INTO flow_alerts VALUES (?,?,?,?,?)",
+                      (m.CHAIN, mint, sign, bucket, int(time.time())))
+        head = ("🟩 NET ACCUMULATION (off exchanges)" if sign > 0 else "🟥 NET DISTRIBUTION (onto exchanges)")
+        pct = f" · {r['pct_mcap']:+.3f}% of mcap" if r.get("pct_mcap") is not None else ""
+        alert(("flow", m.CHAIN, mint, sign, bucket, int(time.time() // 86400)),
+              f"{head} <b>{r['symbol']}</b> [{m.CHAIN}]\n"
+              f"24h net {'+' if net > 0 else '-'}{fmt_usd(abs(net))}{pct}\n"
+              f"off {fmt_usd(r['off_usd'])} / onto {fmt_usd(r['on_usd'])} · {r['n']} moves\n"
+              f"wallets: {r['wallets'] or '–'}\nvenues: {r['venues'] or '–'}\n"
+              f"mcap {fmt_usd(r.get('market_cap'))}")
+
+
 def on_new_events(events, m):
     """Called by a tracker after every poll with freshly parsed + enriched events."""
     now = time.time()
+    try:
+        flow_mints = record_flows(events, m)
+    except Exception as ex:
+        print(f"flow record failed: {ex}")
+        flow_mints = set()
     fresh = [e for e in events if is_signal(e, m) and now - (e.get("ts") or 0) <= FRESH_SECONDS]
     if fresh:
         info = m.token_info([e["mint"] for e in fresh])
+        pending = []   # alerts are built after the DB lock is released (the flow summary reads the DB)
         with _db_lock, db() as c:
             for e in fresh:
                 p0 = (info.get(e["mint"]) or {}).get("price") or e.get("price")
@@ -197,17 +300,30 @@ def on_new_events(events, m):
                     arrow = f"🚨 SENT TO {(e.get('counterparty_label') or 'EXCHANGE').upper()} (likely sell)"
                 elif e.get("from_exchange"):
                     arrow = f"🏦 WITHDREW FROM {(e.get('counterparty_label') or 'EXCHANGE').upper()} (restocking / accumulating)"
-                alert(("sig", e["sig"], e["wallet"]),
-                      f"{arrow} <b>{e.get('symbol')}</b> {fmt_usd(e.get('usd'))} [{m.CHAIN}]\n"
-                      f"{e['label']} ({e['group']})\n"
-                      f"mcap {fmt_usd(e.get('market_cap'))} · price {e.get('price') or p0}\n"
-                      f"{m.EXPLORER_TX}{e['sig']}")
+                pending.append((e, arrow, p0))
+        for e, arrow, p0 in pending:
+            flow = ""
+            if e.get("to_exchange") or e.get("from_exchange"):
+                try:
+                    flow = flow_line(m, e["mint"], e.get("symbol")) + "\n"
+                except Exception as ex:
+                    print(f"flow line failed: {ex}")
+            alert(("sig", e["sig"], e["wallet"]),
+                  f"{arrow} <b>{e.get('symbol')}</b> {fmt_usd(e.get('usd'))} [{m.CHAIN}]\n"
+                  f"{e['label']} ({e['group']})\n"
+                  f"mcap {fmt_usd(e.get('market_cap'))} · price {e.get('price') or p0}\n"
+                  f"{flow}"
+                  f"{m.EXPLORER_TX}{e['sig']}")
     for cl in clusters(m):
         if cl["fresh"]:
             alert(("cluster", m.CHAIN, cl["mint"], len(cl["wallets"])),
                   f"🫧 <b>Cluster buy: {cl['symbol']}</b> [{m.CHAIN}] - {len(cl['wallets'])} of your wallets "
                   f"bought in 72h ({fmt_usd(cl['buy_usd'])})\n" + ", ".join(w["label"] for w in cl["wallets"]) +
                   f"\nhttps://v2.bubblemaps.io/map?address={cl['mint']}&chain={m.BUBBLEMAPS_CHAIN}")
+    try:
+        check_flow_alerts(m, flow_mints)
+    except Exception as ex:
+        print(f"flow alert failed: {ex}")
     check_levels(m)
 
 
