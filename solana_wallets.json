@@ -140,7 +140,7 @@
       "group": "Wintermute",
       "note": "Solscan-labelled. ~$44.8M; moves inventory to/from Binance & OKX; funds the liquidity bot",
       "alert": true,
-      "min_usd": 250000
+      "min_usd": 25000
     },
     {
       "address": "5sTQ5ih7xtctBhMXHr3f1aWdaXazWrWfoehqWdqWnTFP",
