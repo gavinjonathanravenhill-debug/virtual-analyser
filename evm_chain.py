@@ -734,8 +734,8 @@ def watch_funders(frm, to):
                 label = f"Wintermute (auto) {dest[:6]}…{dest[-4:]}"
                 sig.add_wallet(sys_mod(), dest, label, w.get("group") or "Wintermute",
                                f"Auto-added: funded by {w.get('label')} with {amount:.4f} {NATIVE} "
-                               f"in block {b} ({tx['hash'][:10]}…) - same pattern that created Wintermute 4",
-                               True, 100000)
+                               f"in block {b} ({tx['hash'][:10]}…) - same pattern that created Wintermute 4. Alerts on moves >= $2k",
+                               True, 2000)   # alert on moves of $2k or more
                 ep = eth_usd() or 0
                 out.append({"sig": tx["hash"], "ts": int(blk.get("timestamp", "0x0"), 16), "block": b, "wallet": a,
                             "kind": "OUT", "mint": NATIVE, "symbol": NATIVE, "amount": amount, "usd": amount * ep,
