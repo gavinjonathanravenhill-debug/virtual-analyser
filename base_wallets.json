@@ -1,5 +1,5 @@
 {
-  "_note": "BNB Chain wallets. Listing wallets here replaces the built-in defaults, so the defaults are copied in.",
+  "_note": "Base wallets. Listing wallets here replaces the built-in defaults, so the defaults are copied in.",
   "wallets": [
     {
       "address": "0x0000006daea1723962647b7e189d311d757fb793",
@@ -50,26 +50,18 @@
       "note": "Etherscan 'B2C2 Group 1' - ~170k txs, holdings on 14 chains (largest on BSC)"
     },
     {
-      "address": "0xecc4bfcebe4bc14bcc2c947aff2370fc5060ddef",
-      "label": "unipcs",
-      "group": "KOL",
-      "note": "fomo @unipcs - MarsCoin",
+      "address": "0x8425cfd086c5ac9a6e548deeeb7da827ce3282b9",
+      "label": "The__Solstice",
+      "group": "fomo top",
+      "note": "fomo @The__Solstice - #top10 30d PnL +$5.01M (Sep 2026)",
       "alert": true,
       "min_usd": 5000
     },
     {
-      "address": "0x3cd2030392051ff5e6ef06c56ee6636854b0c2ba",
-      "label": "theveeman",
+      "address": "0x9ea9ea628806483afbe314aab0db8f7827670146",
+      "label": "Salem1299534",
       "group": "fomo top",
-      "note": "fomo @theveeman - #top10 30d PnL +$3.68M (Sep 2026)",
-      "alert": true,
-      "min_usd": 5000
-    },
-    {
-      "address": "0xa60d36b9fbbcb133312121c483f44c04266580f7",
-      "label": "DumbCrayonEater",
-      "group": "fomo top",
-      "note": "fomo @DumbCrayonEater - #top10 30d PnL +$2.91M (Sep 2026)",
+      "note": "fomo @Salem1299534 - #top10 30d PnL +$2.79M (Sep 2026)",
       "alert": true,
       "min_usd": 5000
     },
@@ -78,14 +70,6 @@
       "label": "frogmanhaha",
       "group": "fomo top",
       "note": "fomo @frogmanhaha - #top10 30d PnL +$2.45M (Sep 2026)",
-      "alert": true,
-      "min_usd": 5000
-    },
-    {
-      "address": "0xa1a42f43b3ecfe9d686b9de1aafba3f2876b6289",
-      "label": "0xAvast",
-      "group": "fomo top",
-      "note": "fomo @0xAvast - #top10 30d PnL +$2.34M (Sep 2026)",
       "alert": true,
       "min_usd": 5000
     }

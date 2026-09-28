@@ -56,6 +56,78 @@
       "note": "fomo @unipcs - PONS, PONSGUY, DELTA",
       "alert": true,
       "min_usd": 5000
+    },
+    {
+      "address": "0x8425cfd086c5ac9a6e548deeeb7da827ce3282b9",
+      "label": "The__Solstice",
+      "group": "fomo top",
+      "note": "fomo @The__Solstice - #top10 30d PnL +$5.01M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "0x3cd2030392051ff5e6ef06c56ee6636854b0c2ba",
+      "label": "theveeman",
+      "group": "fomo top",
+      "note": "fomo @theveeman - #top10 30d PnL +$3.68M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "0xb91ae2e32cf7bbd555d2b960177ff69555c52a5f",
+      "label": "AvgJoesCrypto",
+      "group": "fomo top",
+      "note": "fomo @AvgJoesCrypto - #top10 30d PnL +$3.02M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "0xa60d36b9fbbcb133312121c483f44c04266580f7",
+      "label": "DumbCrayonEater",
+      "group": "fomo top",
+      "note": "fomo @DumbCrayonEater - #top10 30d PnL +$2.91M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "0x9ea9ea628806483afbe314aab0db8f7827670146",
+      "label": "Salem1299534",
+      "group": "fomo top",
+      "note": "fomo @Salem1299534 - #top10 30d PnL +$2.79M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "0x0fdecedda805e9cb39bd1a50bd458012065b756d",
+      "label": "frogmanhaha",
+      "group": "fomo top",
+      "note": "fomo @frogmanhaha - #top10 30d PnL +$2.45M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "0xa1a42f43b3ecfe9d686b9de1aafba3f2876b6289",
+      "label": "0xAvast",
+      "group": "fomo top",
+      "note": "fomo @0xAvast - #top10 30d PnL +$2.34M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "0x0d035e8d4cf3179956f75cc3804de0beadad7dbd",
+      "label": "Chubbi230",
+      "group": "fomo top",
+      "note": "fomo @Chubbi230 - #top10 30d PnL +$2.16M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "0xdb9a4d42466d50fefa99cd7e2435c4e68e7f04e0",
+      "label": "0xdetweiler",
+      "group": "fomo top",
+      "note": "fomo @0xdetweiler - #top10 30d PnL +$2.15M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
     }
   ],
   "exchanges": {},

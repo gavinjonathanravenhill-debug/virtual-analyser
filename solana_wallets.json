@@ -164,6 +164,62 @@
       "note": "fomo @unipcs (Bonk Guy), 750k followers - USELESS, GLDX; posts theses, 4d avg hold",
       "alert": true,
       "min_usd": 5000
+    },
+    {
+      "address": "FgactYhd2nkUxWfBgY435reoWq2HYsw3AqyRnfaRDfbF",
+      "label": "pointfarmcap",
+      "group": "fomo top",
+      "note": "fomo @pointfarmcap - #top10 30d PnL +$8.88M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "DHezCn8AfYFWocThMeYk94EZceVknjngnHLMTEtWhFyw",
+      "label": "The__Solstice",
+      "group": "fomo top",
+      "note": "fomo @The__Solstice - #top10 30d PnL +$5.01M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "3eKxAi79uaDAJcmK1LkvdmNRJeDBAicjfUvAt5MqBpWd",
+      "label": "theveeman",
+      "group": "fomo top",
+      "note": "fomo @theveeman - #top10 30d PnL +$3.68M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "4PWZyZS6gCb1sGVJsQEarkeo2tBwaDGL3jdZtgP1Fv6h",
+      "label": "DumbCrayonEater",
+      "group": "fomo top",
+      "note": "fomo @DumbCrayonEater - #top10 30d PnL +$2.91M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "GGXxrCUg38CvLBkeTP6SYQFucaJub3YsFeAg7vERWYJQ",
+      "label": "0xAvast",
+      "group": "fomo top",
+      "note": "fomo @0xAvast - #top10 30d PnL +$2.34M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "J9LCPhgpiZFYDotRbAkaap8fswHhbRqZFCcS3iujmh9n",
+      "label": "Chubbi230",
+      "group": "fomo top",
+      "note": "fomo @Chubbi230 - #top10 30d PnL +$2.16M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
+    },
+    {
+      "address": "BYeky9HVy1yT1YTZEwx9FLSvcvookSf6Gg4ScbUYUQw1",
+      "label": "0xdetweiler",
+      "group": "fomo top",
+      "note": "fomo @0xdetweiler - #top10 30d PnL +$2.15M (Sep 2026)",
+      "alert": true,
+      "min_usd": 5000
     }
   ],
   "levels": [],
