@@ -156,6 +156,14 @@
       "group": "Wintermute",
       "note": "Fills retail orders via Jupiter RFQ - individual trades are customer flow, not views. No alerts.",
       "alert": false
+    },
+    {
+      "address": "AaTbdVBjT1THV5iLQwZX1Vjz2GuNVYA4E1eq4CyuTLVL",
+      "label": "unipcs",
+      "group": "KOL",
+      "note": "fomo @unipcs (Bonk Guy), 750k followers - USELESS, GLDX; posts theses, 4d avg hold",
+      "alert": true,
+      "min_usd": 5000
     }
   ],
   "levels": [],

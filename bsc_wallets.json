@@ -1,5 +1,5 @@
 {
-  "_note": "Robinhood Chain wallets to track (0x addresses). Easier: add them from the Wallets tab on /robinhood. group 'Exchange' marks exchange deposit wallets.",
+  "_note": "BNB Chain wallets. Listing wallets here replaces the built-in defaults, so the defaults are copied in.",
   "wallets": [
     {
       "address": "0x0000006daea1723962647b7e189d311d757fb793",
@@ -53,7 +53,7 @@
       "address": "0xecc4bfcebe4bc14bcc2c947aff2370fc5060ddef",
       "label": "unipcs",
       "group": "KOL",
-      "note": "fomo @unipcs - PONS, PONSGUY, DELTA",
+      "note": "fomo @unipcs - MarsCoin",
       "alert": true,
       "min_usd": 5000
     }
