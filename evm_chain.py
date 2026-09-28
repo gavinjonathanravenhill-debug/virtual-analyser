@@ -385,7 +385,17 @@ def enrich(events):
         else:
             e["price"] = t.get("price")
             e["usd"] = e["amount"] * e["price"] if e["price"] else None
+            if _price_suspect(e["usd"], t):     # thin / broken pool price - don't show a fake $ value
+                e["price_suspect"], e["usd"], e["price"] = True, None, None
     return events
+
+
+def _price_suspect(usd, t):
+    """A transfer can't be worth more than the coin's market cap, or 50x the pool it was priced from."""
+    if not usd:
+        return False
+    mc, liq = t.get("market_cap"), t.get("liquidity")
+    return bool((mc and usd > mc) or (liq is not None and liq < 10_000) or (liq and usd > 50 * liq))
 
 
 # --------------------------------------------------------------- poller ----

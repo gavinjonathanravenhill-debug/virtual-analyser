@@ -236,7 +236,7 @@ function row(e, showWallet = true) {
   return `<tr class="${e.alert || e.new_allocation || e.new_wallet ? 'alert' : ''}"><td class="l">${time(e.ts)}</td>
     ${showWallet ? `<td class="l">${chip(e.group)} ${e.label}</td>` : ''}
     <td class="l ${e.kind}">${e.kind}</td><td class="l">${tok}</td><td>${amt(e.amount)}</td><td>${paid}${badge}</td>
-    <td>${usd(e.usd)}</td><td>${px(e.price)}</td><td>${usd(e.market_cap)}</td>
+    <td>${e.price_suspect ? '<span class="dim" title="Only a tiny or broken pool prices this token - value unknown">? no reliable price</span>' : usd(e.usd)}</td><td>${px(e.price)}</td><td>${usd(e.market_cap)}</td>
     <td>${solscan('tx', e.sig, e.sig.slice(0, 8) + '…')}</td></tr>`;
 }
 const head = (w = true) => `<tr><th class="l">Time</th>${w ? '<th class="l">Wallet</th>' : ''}<th class="l">Type</th><th class="l">Token</th><th>Amount</th><th>Paid / got</th><th>USD</th><th>Price</th><th>Mcap</th><th>Tx</th></tr>`;
