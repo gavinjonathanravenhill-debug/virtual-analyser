@@ -26,7 +26,7 @@ X_FEED_QUERY = os.environ.get(
     "X_FEED_QUERY",
     "(" + " OR ".join(f"from:{a}" for a in X_FEED_ACCOUNTS) + ") -is:retweet",
 )
-CACHE_SECONDS = int(os.environ.get("X_FEED_CACHE_SECONDS", "120"))
+CACHE_SECONDS = int(os.environ.get("X_FEED_CACHE_SECONDS", "60"))
 # channel:display handle - display handle is what the tabs show (matches the X account)
 X_FEED_TELEGRAM = [c.strip() for c in os.environ.get(
     "X_FEED_TELEGRAM", "WatcherGuru:WatcherGuru,whale_alert_io:whale_alert,lookonchainchannel:lookonchain"
@@ -163,7 +163,9 @@ XFEED_WIDGET = r"""
 #xf-panel{position:fixed;top:0;right:0;height:100vh;width:360px;max-width:100vw;z-index:9999;background:#060810;border-left:1px solid #1a2040;transform:translateX(100%);transition:transform .25s ease;display:flex;flex-direction:column;font-family:'Space Mono',monospace;color:#e8ecff;box-shadow:-8px 0 24px rgba(0,0,0,.5)}
 #xf-panel.open{transform:none}
 #xf-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #1a2040;font-size:11px;letter-spacing:3px}
-#xf-head button{background:none;border:none;color:#5a6480;font-size:18px;cursor:pointer}
+#xf-head button{background:none;border:none;color:#5a6480;font-size:18px;cursor:pointer;margin-left:6px}
+#xf-tab .xf-n{display:inline-block;margin-top:6px;background:#7fff6e;color:#060810;border-radius:8px;padding:3px 1px;writing-mode:horizontal-tb;font-size:10px;min-width:16px;text-align:center}
+.xf-post.xf-new{border-color:#7fff6e;box-shadow:0 0 0 1px rgba(127,255,110,.35)}
 #xf-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:8px 10px;border-bottom:1px solid #1a2040}
 #xf-tabs button{background:#0d1120;border:1px solid #1a2040;color:#5a6480;font:10px 'Space Mono',monospace;padding:4px 8px;border-radius:4px;cursor:pointer}
 #xf-tabs button.on{color:#7fff6e;border-color:rgba(127,255,110,.4)}
@@ -180,47 +182,59 @@ XFEED_WIDGET = r"""
 </style>
 <div id="xf-tab" title="X news feed">𝕏 NEWS</div>
 <aside id="xf-panel" aria-label="X news feed">
-  <div id="xf-head"><span>𝕏 NEWS FEED</span><button id="xf-close" aria-label="Close">×</button></div>
+  <div id="xf-head"><span>𝕏 NEWS FEED</span><span><button id="xf-mute" title="Chime on new posts" aria-label="Toggle chime">🔔</button><button id="xf-close" aria-label="Close">×</button></span></div>
   <div id="xf-tabs"></div>
   <div id="xf-body"><div class="xf-note">Loading…</div></div>
 </aside>
 <script>
 (function(){
   var panel=document.getElementById('xf-panel'),body=document.getElementById('xf-body'),
-      tabs=document.getElementById('xf-tabs'),cfg=null,filter='ALL',timer=null,widgets=false;
+      tabs=document.getElementById('xf-tabs'),tabBtn=document.getElementById('xf-tab'),muteBtn=document.getElementById('xf-mute'),
+      cfg=null,filter='ALL',seen=null,fresh={},unread=0,ctx=null;
   function esc(s){return String(s||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
   function ago(iso){var s=(Date.now()-new Date(iso))/1000;if(s<60)return Math.floor(s)+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h';return Math.floor(s/86400)+'d'}
+  function muted(){try{return localStorage.getItem('xfMute')==='1'}catch(e){return false}}
+  function drawMute(){muteBtn.textContent=muted()?'🔕':'🔔';muteBtn.title=muted()?'Chime off - click to turn on':'Chime on - click to mute'}
+  // browsers only allow sound after you've clicked/typed on the page once
+  function unlock(){try{ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();if(ctx.state==='suspended')ctx.resume()}catch(e){}}
+  ['click','keydown','touchstart'].forEach(function(ev){document.addEventListener(ev,unlock,{passive:true})});
+  function chime(){
+    if(muted())return;unlock();if(!ctx)return;
+    var t=ctx.currentTime;[[880,0],[1318.5,0.14]].forEach(function(n){      // A5 then E6 - soft two-note ping
+      var o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.value=n[0];
+      g.gain.setValueAtTime(0.0001,t+n[1]);g.gain.exponentialRampToValueAtTime(0.25,t+n[1]+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+n[1]+0.6);o.connect(g);g.connect(ctx.destination);o.start(t+n[1]);o.stop(t+n[1]+0.65)});
+  }
+  function drawBadge(){tabBtn.innerHTML='𝕏 NEWS'+(unread?'<span class="xf-n">'+unread+'</span>':'')}
   function drawTabs(list){
     tabs.innerHTML='';list.forEach(function(a){var b=document.createElement('button');b.textContent=a==='ALL'?'ALL':'@'+a;
       if(a===filter)b.className='on';b.onclick=function(){filter=a;render()};tabs.appendChild(b)});
   }
-  function renderApi(){
-    drawTabs(['ALL'].concat(cfg.accounts));
+  function render(){
+    if(!cfg)return;
+    drawTabs(['ALL'].concat(cfg.accounts||[]));
     var posts=(cfg.posts||[]).filter(function(p){return filter==='ALL'||p.username.toLowerCase()===filter.toLowerCase()});
-    var h=posts.map(function(p){return '<a class="xf-post" href="'+esc(p.url)+'" target="_blank" rel="noopener">'+
+    var h=posts.map(function(p){return '<a class="xf-post'+(fresh[p.id]?' xf-new':'')+'" href="'+esc(p.url)+'" target="_blank" rel="noopener">'+
       '<div class="xf-who">'+(p.avatar?'<img src="'+esc(p.avatar)+'" alt="">':'')+'<b>'+esc(p.name)+'</b><span>@'+esc(p.username)+' · '+ago(p.created_at)+'</span></div>'+
       '<div class="xf-text">'+esc(p.text)+'</div><div class="xf-meta">'+(p.source==='Telegram'?esc(p.likes)+' · via Telegram':'♥ '+p.likes+'  ⟲ '+p.reposts)+'</div></a>'}).join('');
     if(!h)h='<div class="xf-note">No posts yet.</div>';
     if(cfg.error)h='<div class="xf-note">'+esc(cfg.error)+'</div>'+h;
     body.innerHTML=h;
   }
-  function renderEmbed(){
-    if(filter==='ALL'||cfg.accounts.indexOf(filter)<0)filter=cfg.accounts[0];
-    drawTabs(cfg.accounts);
-    body.innerHTML='<a class="twitter-timeline" data-theme="dark" data-chrome="noheader nofooter transparent" data-height="2000" href="https://twitter.com/'+esc(filter)+'">Posts by @'+esc(filter)+'</a>'+
-      '<div class="xf-note">If nothing appears, you may need to be signed in to X in this browser.</div>';
-    if(window.twttr&&twttr.widgets){twttr.widgets.load(body)}
-    else if(!widgets){widgets=true;var s=document.createElement('script');s.async=true;s.src='https://platform.twitter.com/widgets.js';document.body.appendChild(s)}
-  }
-  function render(){if(!cfg)return;cfg.mode==='api'?renderApi():renderEmbed()}
   function load(){fetch('/api/xfeed',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
-      var modeChanged=!cfg||cfg.mode!==d.mode;cfg=d;if(d.mode==='api'||modeChanged)render()})
+      cfg=d;var ids=(d.posts||[]).map(function(p){return p.id});
+      if(seen===null){seen={};ids.forEach(function(i){seen[i]=1})}           // first load: nothing counts as new
+      else{var n=0;ids.forEach(function(i){if(!seen[i]){seen[i]=1;fresh[i]=1;n++}});
+        if(n){chime();if(!panel.classList.contains('open')){unread+=n;drawBadge()}}}
+      render()})
     .catch(function(){body.innerHTML='<div class="xf-note">Feed unavailable.</div>'})}
-  function open(){panel.classList.add('open');try{localStorage.setItem('xfOpen','1')}catch(e){}
-    if(!cfg)load();if(!timer)timer=setInterval(function(){if(cfg&&cfg.mode==='api')load()},60000)}
-  function close(){panel.classList.remove('open');try{localStorage.removeItem('xfOpen')}catch(e){}}
-  document.getElementById('xf-tab').onclick=function(){panel.classList.contains('open')?close():open()};
+  function open(){panel.classList.add('open');unread=0;drawBadge();try{localStorage.setItem('xfOpen','1')}catch(e){}}
+  function close(){panel.classList.remove('open');fresh={};render();try{localStorage.removeItem('xfOpen')}catch(e){}}
+  tabBtn.onclick=function(){unlock();panel.classList.contains('open')?close():open()};
   document.getElementById('xf-close').onclick=close;
+  muteBtn.onclick=function(){try{localStorage.setItem('xfMute',muted()?'0':'1')}catch(e){}drawMute();if(!muted()){unlock();chime()}};
+  drawMute();
+  load();setInterval(load,60000);   // checks every minute even when the panel is closed
   try{if(localStorage.getItem('xfOpen'))open()}catch(e){}
 })();
 </script>
