@@ -158,9 +158,11 @@
         <input id="w-note" placeholder="Notes (optional)" style="width:180px">
         <input id="w-min" placeholder="Alert if ≥ $ (optional)" style="width:150px" title="Only alert on moves at least this big - use for busy wallets like a treasury">
         <label class="tog"><input type="checkbox" id="w-alert" checked> 🔔 Alerts</label>
-        <button onclick="addWallet()">Add</button>
+        <button id="w-save" onclick="addWallet()">Add</button>
+        <button id="w-cancel" onclick="cancelEdit()" style="display:none">Cancel</button>
       </div>
-      <div class="note">Group <b>Exchange</b> marks an exchange deposit wallet - any tracked wallet sending tokens to it is flagged "→ exchange (likely sell)".</div>
+      <div class="note" id="w-persist" style="color:#f5b041"></div>
+      <div class="note">✏️ edits a wallet (label, group, notes, alert size) · 🗑 deletes it (click twice). Group <b>Exchange</b> marks an exchange deposit wallet - any tracked wallet sending tokens to it is flagged "→ exchange (likely sell)".</div>
     </div>
     <div class="card"><table id="wallet-table"></table></div>
     <div class="card" id="exch-card"></div>
@@ -246,7 +248,8 @@ async function loadWallets() {
   wallets = d.wallets;
   const ex = Object.entries(d.exchanges || {});
   $('#exch-card').innerHTML = `<h3>Exchange wallets (${ex.length})</h3>` + (ex.length ? '<table><tr><th class="l">Exchange</th><th class="l">Address</th></tr>' +
-    ex.map(([a, n]) => `<tr><td class="l">${n}</td><td class="l">${solscan('account', a, short(a))}</td></tr>`).join('') + '</table>'
+    ex.map(([a, n]) => `<tr><td class="l">${n}</td><td class="l">${solscan('account', a, short(a))}</td>
+      <td><button title="Edit" onclick="editWallet('${a}')">✏️</button> <button title="Delete" onclick="delWallet('${a}')">🗑</button></td></tr>`).join('') + '</table>'
     : '<div class="dim">None yet - add one above with group "Exchange".</div>');
   const st = d.status;
   $('#status').textContent = st.last_poll ? `${st.rpc || ''} · last scan ${ago(st.last_poll)} · ${st.polls} scans` + (st.last_error ? ' · ⚠ ' + st.last_error : '') : 'first scan running…';
@@ -254,7 +257,26 @@ async function loadWallets() {
   const g = $('#f-group').value, w = $('#f-wallet').value;
   $('#f-group').innerHTML = '<option value="">All groups</option>' + groups.map(x => `<option ${x === g ? 'selected' : ''}>${x}</option>`).join('');
   $('#f-wallet').innerHTML = '<option value="">All wallets</option>' + wallets.map(x => `<option value="${x.address}" ${x.address === w ? 'selected' : ''}>${x.label} (${short(x.address)})</option>`).join('');
+  $('#w-persist').innerHTML = d.db_persistent ? '' :
+    '⚠ Edits and deletes are saved on the server but <b>reset on each redeploy</b> - add a Railway volume mounted at <code>/data</code> and set <code>SIGNAL_DB=/data/signals.db</code> to keep them.';
+  window.exchanges = d.exchanges || {};
   renderWallets();
+}
+function editWallet(a) {
+  const w = wallets.find(x => x.address === a), exn = (window.exchanges || {})[a];
+  $('#w-addr').value = a;
+  $('#w-label').value = w ? w.label : exn || '';
+  $('#w-group').value = w ? w.group : 'Exchange';
+  $('#w-note').value = w ? (w.note || '') : '';
+  $('#w-min').value = w && w.min_usd ? w.min_usd : '';
+  $('#w-alert').checked = w ? !!w.alert : false;
+  $('#w-save').textContent = 'Save changes';
+  $('#w-cancel').style.display = '';
+  $('#w-addr').scrollIntoView({behavior: 'smooth', block: 'center'}); $('#w-label').focus();
+}
+function cancelEdit() {
+  ['w-addr', 'w-label', 'w-note', 'w-min'].forEach(id => document.getElementById(id).value = '');
+  $('#w-save').textContent = 'Add'; $('#w-cancel').style.display = 'none';
 }
 let sortKey = 'last_seen', sortDir = -1;  // -1 = newest / Z first
 function sortBy(k) { sortDir = sortKey === k ? -sortDir : (k === 'last_seen' || k === 'last_tx' ? -1 : 1); sortKey = k; renderWallets(); }
@@ -267,7 +289,8 @@ function renderWallets() {
       <td class="l">${solscan('account', x.address, short(x.address))}</td><td class="l dim">${x.note || ''}</td><td title="${x.trades || 0} swaps seen">${x.median_trade ? usd(x.median_trade) : '–'}</td><td>${ago(x.last_seen)}</td>
       <td>${x.last_tx ? ago(x.last_tx) : x.checked ? '<span class="err" title="No transactions at all - probably a mistyped character">⚠ none – check address</span>' : '<span class="dim">scanning…</span>'}</td>
       <td><a href="#" class="tx" onclick="event.stopPropagation();profileWallet('${x.address}');return false">profile</a> · <span class="dim">feed →</span>
-        ${x.source === 'page' ? `<button title="Stop tracking" onclick="event.stopPropagation();delWallet('${x.address}')">✕</button>` : ''}</td></tr>`).join('');
+        <button title="Edit label, group, notes, alerts" onclick="event.stopPropagation();editWallet('${x.address}')">✏️</button>
+        <button title="Delete - stop tracking" onclick="event.stopPropagation();delWallet('${x.address}')">🗑</button></td></tr>`).join('');
   const dl = document.getElementById('w-groups');
   if (dl) dl.innerHTML = [...new Set(['Exchange', 'Mine', ...wallets.map(w => w.group)])].map(g => `<option value="${g}">`).join('');
 }
@@ -343,12 +366,13 @@ async function addWallet() {
     await send('POST', API + '/wallets', {address: $('#w-addr').value.trim(), label: $('#w-label').value.trim(),
       group: $('#w-group').value.trim() || 'Mine', note: $('#w-note').value.trim(), alert: $('#w-alert').checked,
       min_usd: $('#w-min').value.replace(/[$,]/g, '').replace(/k$/i, '000').replace(/m$/i, '000000')});
-    ['w-addr', 'w-label', 'w-note', 'w-min'].forEach(id => document.getElementById(id).value = '');
-    await loadWallets(); alertBox('Added - it will be scanned on the next poll.');
+    const editing = $('#w-save').textContent !== 'Add';
+    cancelEdit();
+    await loadWallets(); alertBox(editing ? 'Saved.' : 'Added - it will be scanned on the next poll.');
   } catch (e) { alertBox(e.message); }
 }
 async function delWallet(a) {
-  if (!window.confirmDel || window.confirmDel !== a) { window.confirmDel = a; alertBox('Click ✕ again to remove this wallet'); return; }
+  if (!window.confirmDel || window.confirmDel !== a) { window.confirmDel = a; alertBox('Click 🗑 again to delete this wallet'); return; }
   try { await send('DELETE', API + '/wallets?address=' + encodeURIComponent(a)); window.confirmDel = null; loadWallets(); } catch (e) { alertBox(e.message); }
 }
 

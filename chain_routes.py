@@ -49,6 +49,7 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
                 sizes.setdefault(e["wallet"], []).append(e["usd"])
         med = {w: sorted(v)[len(v) // 2] for w, v in sizes.items()}
         return jsonify({"status": m.tracker.status,
+                        "db_persistent": sig.db_persistent(),
                         "wallets": [{**w, "last_seen": last.get(a), "last_tx": m.tracker.last_tx.get(a),
                                      "checked": a in m.tracker.checked, "median_trade": med.get(a),
                                      "trades": len(sizes.get(a, []))} for a, w in list(m.WALLETS.items())],

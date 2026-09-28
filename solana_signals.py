@@ -61,6 +61,8 @@ def register(m):
     """Called by each chain module once its tracker exists. Loads page-added wallets too."""
     CHAINS[m.CHAIN] = m
     init_db()
+    if not hasattr(m, "_file_addrs"):   # wallets that come from the code / JSON file (not added on the page)
+        m._file_addrs = set(m.WALLETS) | set(m.EXCHANGES)
     load_db_wallets(m)
     if on_new_events_for(m) not in m.tracker.listeners:
         m.tracker.listeners.append(on_new_events_for(m))
@@ -83,10 +85,26 @@ def load_db_wallets(m):
         _apply_wallet(m, r)
 
 
+REMOVED = "__removed__"   # DB marker: a built-in wallet you deleted from the page
+
+
+def db_persistent():
+    """True when the DB lives on a mounted volume (survives Railway redeploys)."""
+    d = os.path.dirname(os.path.abspath(DB_PATH))
+    return os.path.ismount(d) or d.startswith("/data")
+
+
 def _apply_wallet(m, r):
-    if (r.get("grp") or "").strip().lower() == "exchange":
+    grp = (r.get("grp") or "").strip()
+    if grp == REMOVED:
+        m.WALLETS.pop(r["address"], None)
+        m.EXCHANGES.pop(r["address"], None)
+        return
+    if grp.lower() == "exchange":
+        m.WALLETS.pop(r["address"], None)
         m.EXCHANGES[r["address"]] = r["label"]
         return
+    m.EXCHANGES.pop(r["address"], None)
     m.WALLETS[r["address"]] = {"address": r["address"], "label": r["label"], "group": r["grp"] or "Mine",
                                "note": r.get("note") or "", "alert": bool(r["alert"]), "source": "page",
                                "min_usd": r.get("min_usd")}
@@ -108,14 +126,17 @@ def add_wallet(m, address, label, group, note="", alert_on=True, min_usd=None):
 
 
 def remove_wallet(m, address):
+    """Stop tracking a wallet. Built-in ones get a 'removed' marker so they stay gone after a restart."""
+    known = address in m.WALLETS or address in m.EXCHANGES
     with _db_lock, db() as c:
         n = c.execute("DELETE FROM wallets WHERE chain=? AND address=?", (m.CHAIN, address)).rowcount
-    if n:
-        w = m.WALLETS.get(address)
-        if w and w.get("source") == "page":
-            m.WALLETS.pop(address, None)
-        m.EXCHANGES.pop(address, None)
-    return n
+        if address in getattr(m, "_file_addrs", ()):
+            c.execute("""INSERT OR REPLACE INTO wallets (chain, address, label, grp, note, alert, created, min_usd)
+                         VALUES (?,?,?,?,?,?,?,?)""", (m.CHAIN, address, "", REMOVED, "", 0, int(time.time()), None))
+            n = 1
+    m.WALLETS.pop(address, None)
+    m.EXCHANGES.pop(address, None)
+    return n or int(known)
 
 
 # ---------------------------------------------------------------- alerts ---
