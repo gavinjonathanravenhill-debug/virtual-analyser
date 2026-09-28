@@ -31,6 +31,12 @@ _WM = [
     {"address": "0x000002cba8dfb0a86a47a415592835e17fac080a", "label": "Wintermute 2",
      "group": "Wintermute", "alert": False, "note": "Etherscan 'Wintermute 2' - mostly dormant"},
 ]
+# B2C2 - Robinhood's other big crypto market maker (12% of its transaction revenue, Q1 2025 10-Q)
+_B2C2 = [
+    {"address": "0xc333e80ef2dec2805f239e3f1e810612d294f771", "label": "B2C2 Group 1",
+     "group": "B2C2", "alert": True, "min_usd": 250000,
+     "note": "Etherscan 'B2C2 Group 1' - ~170k txs, holdings on 14 chains (largest on BSC)"},
+]
 _WM_ETH_ONLY = [
     {"address": "0x4f3a120e72c76c22ae802d129f599bfdbc31cb81", "label": "Wintermute multisig",
      "group": "Wintermute", "alert": True, "min_usd": 250000,
@@ -66,7 +72,7 @@ CONFIGS = {
         "block_seconds": 12, "poll": 12, "max_range": 2000, "start_hours": 3, "gap": 0.05,
         "gt": "eth", "bubblemaps": "eth", "dexscreener": "ethereum", "coingecko_native": "ethereum",
         "explorer": "https://etherscan.io", "explorer_name": "Etherscan",
-        "default_wallets": _WM + _WM_ETH_ONLY, "default_exchanges": _ETH_EXCHANGES,
+        "default_wallets": _WM + _WM_ETH_ONLY + _B2C2, "default_exchanges": _ETH_EXCHANGES,
     },
     "base": {
         "chain": "base", "name": "Base", "native": "ETH", "wrapped": ["WETH", "ETH"],
@@ -75,7 +81,7 @@ CONFIGS = {
         "block_seconds": 2, "poll": 10, "max_range": 5000, "start_hours": 3, "gap": 0.05,
         "gt": "base", "bubblemaps": "base", "dexscreener": "base", "coingecko_native": "ethereum",
         "explorer": "https://basescan.org", "explorer_name": "Basescan",
-        "default_wallets": _WM, "default_exchanges": {},
+        "default_wallets": _WM + _B2C2, "default_exchanges": {},
     },
     "bsc": {
         "chain": "bsc", "name": "BNB Chain", "native": "BNB", "wrapped": ["WBNB", "BNB"],
@@ -84,7 +90,7 @@ CONFIGS = {
         "block_seconds": 0.75, "poll": 10, "max_range": 5000, "start_hours": 3, "gap": 0.05,
         "gt": "bsc", "bubblemaps": "bsc", "dexscreener": "bsc", "coingecko_native": "binancecoin",
         "explorer": "https://bscscan.com", "explorer_name": "BscScan",
-        "default_wallets": _WM, "default_exchanges": _BSC_EXCHANGES,
+        "default_wallets": _WM + _B2C2, "default_exchanges": _BSC_EXCHANGES,
     },
     "robinhood": {
         "chain": "robinhood", "name": "Robinhood Chain", "native": "ETH", "wrapped": ["WETH", "ETH"],
@@ -93,7 +99,7 @@ CONFIGS = {
         "gt": "robinhood", "bubblemaps": "robinhood", "dexscreener": "robinhood", "coingecko_native": "ethereum",
         "explorer": "https://robinhoodchain.blockscout.com", "explorer_name": "Blockscout",
         "holders_suffix": "?tab=holders", "portfolio_suffix": "?tab=tokens",
-        "default_wallets": _WM, "default_exchanges": {},
+        "default_wallets": _WM + _B2C2, "default_exchanges": {},
     },
 }
 

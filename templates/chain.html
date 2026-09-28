@@ -62,7 +62,7 @@
   .g-Wintermute { background:#5fd16a; } .g-Market { background:#d9b36a; } .g-Bots { background:#e0a526; }
   .g-Whales { background:#dcdc3a; } .g-Clever { background:#e040d0; } .g-Other { background:#9aa5b1; }
   .g-Extra, .g-Lookup { background:#4aa3ff; }
-  .g-PENGU { background:#8fd3ff; }
+  .g-PENGU { background:#8fd3ff; } .g-B2C2 { background:#c9a0ff; } .g-Robinhood { background:#cfff04; }
   .exch { color:#fff; background:var(--red); border-radius:4px; padding:0 5px; font-weight:700; font-size:11px; }
   tr.alert td { background:#132a1a; }
   .BUY { color:var(--green); font-weight:700; } .SELL { color:var(--red); font-weight:700; }
@@ -85,6 +85,7 @@
 <nav id="tabs">
   <button data-t="feed" class="on">Feed</button>
   <button data-t="profile">Wallet profiler</button>
+  <button data-t="flows">MM ↔ Robinhood</button>
   <button data-t="signals">Signals</button>
   <button data-t="wallets">Wallets</button>
   <button data-t="lookup">Lookup</button>
@@ -120,6 +121,23 @@
     </div>
     <div id="pf-body"><div class="dim">Tells you what a wallet is, what it holds, and which manipulation pattern its behaviour matches best.
       Takes <span class="rpcnote">a little while</span>. Heuristic - always read the evidence.</div></div>
+  </section>
+
+  <section class="tab" id="t-flows">
+    <div class="note" style="margin:0 0 12px">Robinhood fills app orders through market makers - mainly <b>Wintermute</b> and <b>B2C2</b>.
+      When a market maker sends a coin to Robinhood, Robinhood customers were <b>net buying</b> it; coins going back = <b>net selling</b>.
+      Sends to exchanges are inventory arriving to be sold there. Built from transfers seen since the server started.</div>
+    <div class="controls" style="margin:0 0 12px;flex-wrap:wrap">
+      <select id="fl-hours"><option value="24">24h</option><option value="72" selected>3 days</option>
+        <option value="168">7 days</option><option value="720">30 days</option></select>
+      <select id="fl-venue"><option value="Robinhood">Robinhood only</option><option value="">All brokers & exchanges</option></select>
+      <button onclick="loadFlows()">Refresh</button>
+    </div>
+    <div class="tiles" id="fl-tiles"></div>
+    <div class="card"><h3>Per coin</h3><table id="fl-table"><tr><td class="dim l">Loading…</td></tr></table></div>
+    <div class="card"><h3>Robinhood hot wallet → storage sweeps</h3><table id="fl-sweeps"></table>
+      <div class="note">Robinhood keeps a small float in its hot wallet and sweeps the excess into storage.
+        Steady sweeps <b>into</b> storage = customers holding more of that coin overall.</div></div>
   </section>
 
   <section class="tab" id="t-signals">
@@ -202,6 +220,7 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.id === 't-' + b.dataset.t));
   if (b.dataset.t === 'signals') loadSignals();
+  if (b.dataset.t === 'flows') loadFlows();
 });
 ['#f-group', '#f-wallet', '#f-swaps', '#f-min'].forEach(s => $(s).onchange = loadFeed);
 
@@ -552,6 +571,45 @@ setInterval(refresh, 60000);
   }).observe(document.body, {childList: true, subtree: true});
   document.querySelectorAll('table').forEach(apply);
 })();
+
+// ---------- market maker <-> Robinhood / exchange flows ----------
+['#fl-hours', '#fl-venue'].forEach(s => $(s).onchange = loadFlows);
+async function loadFlows() {
+  const t = $('#fl-table');
+  try {
+    const d = await api(`${API}/flows?hours=${$('#fl-hours').value}`);
+    const vf = $('#fl-venue').value;
+    const rows = d.rows.filter(r => !vf || r.venue === vf);
+    const rh = d.venues.find(v => v.venue === 'Robinhood') || {to_usd: 0, from_usd: 0, n: 0};
+    const net = rh.to_usd - rh.from_usd;
+    $('#fl-tiles').innerHTML = `
+      <div class="tile"><div class="k">MM → Robinhood (customers buying)</div><div class="v pos">${usd(rh.to_usd)}</div></div>
+      <div class="tile"><div class="k">Robinhood → MM (customers selling)</div><div class="v neg">${usd(rh.from_usd)}</div></div>
+      <div class="tile"><div class="k">Net retail flow</div><div class="v ${net >= 0 ? 'pos' : 'neg'}">${net >= 0 ? '+' : '−'}${usd(Math.abs(net))}</div>
+        <div class="dim">${net >= 0 ? 'net buying' : 'net selling'}</div></div>
+      <div class="tile"><div class="k">Market-maker wallets watched</div><div class="v">${d.mm_wallets}</div>
+        <div class="dim">${d.mm_groups.join(' · ')}</div></div>`;
+    t.innerHTML = `<tr><th class="l">Market maker</th><th class="l">To</th><th class="l">Coin</th><th>Sent</th><th>Came back</th>
+      <th>Net</th><th class="l">Reads as</th><th>Transfers</th><th>Last</th></tr>` + (rows.map(r => {
+      const rhv = r.venue === 'Robinhood';
+      const reads = r.net_usd >= 0 ? (rhv ? '<span class="pos">Robinhood buyers</span>' : 'MM stocking exchange (to sell)')
+        : (rhv ? '<span class="neg">Robinhood sellers</span>' : 'MM pulling from exchange (bought)');
+      const coin = r.mint && r.mint !== CFG.native && r.mint !== 'SOL'
+        ? `<a href="#" class="tx" onclick="openToken('${r.mint}');return false">${r.symbol || short(r.mint)} 🔍</a>` : (r.symbol || CFG.native);
+      return `<tr><td class="l">${chip(r.mm)}</td><td class="l">${rhv ? chip('Robinhood') : r.venue}</td><td class="l">${coin}</td>
+        <td>${usd(r.to_usd)}</td><td>${usd(r.from_usd)}</td>
+        <td class="${r.net_usd >= 0 ? 'pos' : 'neg'}">${r.net_usd >= 0 ? '+' : '−'}${usd(Math.abs(r.net_usd))}</td>
+        <td class="l">${reads}</td><td>${r.n}</td><td>${ago(r.last)}</td></tr>`;
+    }).join('') || `<tr><td colspan="9" class="dim l">No market-maker ${vf ? 'transfers with ' + vf : 'transfers with brokers/exchanges'} in this window yet.
+      Tracked since ${ago(d.tracked_since)} - these moves are occasional, give it time.</td></tr>`);
+    $('#fl-sweeps').innerHTML = `<tr><th class="l">Coin</th><th>Into storage</th><th>Out of storage</th><th>Net</th><th>Moves</th><th>Last</th></tr>` +
+      (d.sweeps.map(s => { const n = s.in_usd - s.out_usd; return `<tr><td class="l">${s.mint && s.mint !== 'SOL' ?
+        `<a href="#" class="tx" onclick="openToken('${s.mint}');return false">${s.symbol || short(s.mint)} 🔍</a>` : (s.symbol || CFG.native)}</td>
+        <td>${usd(s.in_usd)}</td><td>${usd(s.out_usd)}</td><td class="${n >= 0 ? 'pos' : 'neg'}">${n >= 0 ? '+' : '−'}${usd(Math.abs(n))}</td>
+        <td>${s.n}</td><td>${ago(s.last)}</td></tr>`; }).join('')
+       || '<tr><td colspan="6" class="dim l">No sweeps seen yet (needs a wallet in group "Robinhood" on this chain).</td></tr>');
+  } catch (e) { t.innerHTML = `<tr><td class="l neg">${e.message}</td></tr>`; }
+}
 </script>
 </body>
 </html>

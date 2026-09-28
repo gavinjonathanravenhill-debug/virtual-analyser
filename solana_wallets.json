@@ -122,10 +122,10 @@
     },
     {
       "address": "51yZyDSnec4xnUv7XLRVYcDyV4x3wUtzrDcRaYbmQU5j",
-      "label": "PENGU whale #4 (unlabelled)",
-      "group": "PENGU whales",
-      "note": "4.55% - biggest unidentified holder",
-      "alert": true
+      "label": "Robinhood custody (storage)",
+      "group": "Robinhood",
+      "note": "Robinhood customer coins (~$630M: SOL/TRUMP/PENGU/WIF/BONK) - Solscan #Robinhood #Deposit Address. Topped up from Robinhood Hot Wallet 4xLpw; first funding traced to Wintermute. Was listed as 'PENGU whale #4' (4.55% - biggest unidentified holder)",
+      "alert": false
     },
     {
       "address": "3XT1PNGE2mC31WSxY4jkEcVDLXGovReFEHzvaHm7SgtS",

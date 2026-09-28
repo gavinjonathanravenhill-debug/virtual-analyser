@@ -113,4 +113,94 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
         depth = max(10, min(int(request.args.get("depth", 40)), 100))
         return safe(lambda: profile_fn(a, depth))
 
+    add_flow_route(bp, m, start)
     return bp
+
+
+# ------------------------------------------------ market maker <-> venue flows ----
+import os as _os
+import time as _time
+
+MM_GROUPS = [g.strip() for g in _os.getenv("FLOW_MM_GROUPS", "Wintermute,B2C2").split(",") if g.strip()]
+
+
+def mm_flows(m, hours=72):
+    """Per coin: what the market makers (Wintermute, B2C2) sent to / took back from brokers & exchanges.
+
+    Robinhood fills app orders through these market makers, so MM -> Robinhood = Robinhood
+    customers net buying that coin; Robinhood -> MM = net selling. For exchanges, MM -> exchange
+    is inventory arriving to be sold there.
+    """
+    since = _time.time() - hours * 3600
+    mm = {a: w.get("group") for a, w in m.WALLETS.items() if w.get("group") in MM_GROUPS}
+
+    def venue(a):
+        w = m.WALLETS.get(a) or {}
+        name = m.EXCHANGES.get(a) or (w.get("label") if (w.get("group") or "") in ("Robinhood", "Exchange") else None)
+        if not name:
+            return None
+        return "Robinhood" if "robinhood" in name.lower() or w.get("group") == "Robinhood" else name
+
+    def is_storage(a):
+        return (m.WALLETS.get(a) or {}).get("group") == "Robinhood"
+
+    rows, sweeps, seen = {}, {}, set()
+    for e in m.tracker.query(limit=5000):
+        if e["ts"] < since or e["kind"] not in ("IN", "OUT") or not e.get("counterparty"):
+            continue
+        w, cp = e["wallet"], e["counterparty"]
+        key = (e["sig"], e.get("mint"))
+        if w in mm and venue(cp):                   # seen from the market maker's side
+            grp, ven, to_venue = mm[w], venue(cp), e["kind"] == "OUT"
+        elif venue(w) and cp in mm:                 # seen from a tracked broker wallet's side
+            grp, ven, to_venue = mm[cp], venue(w), e["kind"] == "IN"
+        elif is_storage(w) and venue(cp) == "Robinhood":   # Robinhood hot wallet <-> storage sweep
+            if key in seen:
+                continue
+            seen.add(key)
+            s = sweeps.setdefault(e.get("mint"), {"mint": e.get("mint"), "symbol": e.get("symbol"),
+                                                 "in_usd": 0.0, "out_usd": 0.0, "in_amt": 0.0, "out_amt": 0.0,
+                                                 "n": 0, "last": 0})
+            k = "in" if e["kind"] == "IN" else "out"
+            s[k + "_usd"] += e.get("usd") or 0
+            s[k + "_amt"] += e.get("amount") or 0
+            s["n"] += 1
+            s["last"] = max(s["last"], e["ts"])
+            continue
+        else:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        r = rows.setdefault((grp, ven, e.get("mint")), {
+            "mm": grp, "venue": ven, "mint": e.get("mint"), "symbol": e.get("symbol"),
+            "to_usd": 0.0, "from_usd": 0.0, "to_amt": 0.0, "from_amt": 0.0, "n": 0, "last": 0,
+            "market_cap": e.get("market_cap")})
+        k = "to" if to_venue else "from"
+        r[k + "_usd"] += e.get("usd") or 0
+        r[k + "_amt"] += e.get("amount") or 0
+        r["n"] += 1
+        r["last"] = max(r["last"], e["ts"])
+        r["symbol"] = r["symbol"] or e.get("symbol")
+    out = sorted(rows.values(), key=lambda r: -abs(r["to_usd"] - r["from_usd"]))
+    for r in out:
+        r["net_usd"] = r["to_usd"] - r["from_usd"]
+    totals = {}
+    for r in out:
+        t = totals.setdefault(r["venue"], {"venue": r["venue"], "to_usd": 0.0, "from_usd": 0.0, "n": 0})
+        t["to_usd"] += r["to_usd"]; t["from_usd"] += r["from_usd"]; t["n"] += r["n"]
+    return {"hours": hours, "mm_groups": MM_GROUPS, "mm_wallets": len(mm),
+            "venues": sorted(totals.values(), key=lambda t: -(t["to_usd"] + t["from_usd"])),
+            "rows": out[:200], "sweeps": sorted(sweeps.values(), key=lambda s: -abs(s["in_usd"] - s["out_usd"])),
+            "tracked_since": m.tracker.status.get("started")}
+
+
+def add_flow_route(bp, m, start):
+    @bp.route(f"/api/{m.CHAIN}/flows")
+    def flows():
+        start()
+        try:
+            hours = max(1, min(int(request.args.get("hours", 72)), 24 * 30))
+            return jsonify(mm_flows(m, hours))
+        except Exception as e:
+            return jsonify({"error": str(e)}), 502

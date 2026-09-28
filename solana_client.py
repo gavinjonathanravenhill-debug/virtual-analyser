@@ -209,6 +209,14 @@ def parse_tx(tx, owner):
     else:  # only SOL/stables moved
         m, d = max(quotes.items(), key=lambda x: abs(x[1]))
         ev.update(mint=m if m != "SOL" else "SOL", amount=abs(d), kind="IN" if d > 0 else "OUT")
+        if m == "SOL":   # who sent / received the SOL?
+            cands = [(keys[j], (meta["postBalances"][j] - meta["preBalances"][j]) / 1e9)
+                     for j in range(min(len(keys), len(meta["postBalances"]))) if keys[j] != owner]
+        else:
+            cands = [(o, dd) for (mm, o), dd in others.items() if mm == m and o]
+        cands = [c for c in cands if (c[1] > 0) != (d > 0) and abs(c[1]) >= abs(d) * 0.5]
+        if cands:
+            ev["counterparty"] = max(cands, key=lambda x: abs(x[1]))[0]
     return ev
 
 
