@@ -231,9 +231,11 @@ function row(e, showWallet = true) {
     : e.counterparty ? (e.to_exchange ? `<span class="exch">→ ${e.counterparty_label}</span>`
       : e.from_exchange ? `<span class="exch" style="background:var(--green);color:#0b0f14">← ${e.counterparty_label}</span>`
       : `${e.kind === 'OUT' ? '→' : '←'} ${e.counterparty_label || short(e.counterparty)}`) : '–';
-  return `<tr class="${e.alert ? 'alert' : ''}"><td class="l">${time(e.ts)}</td>
+  const badge = e.new_allocation ? ' <span class="exch" style="background:#cfff04;color:#0b0f14" title="First time this wallet has held this token - likely a new market-making deal">🆕 new allocation</span>'
+    : e.new_wallet ? ' <span class="exch" style="background:#cfff04;color:#0b0f14" title="Sent gas to a brand-new address - now tracked">🐣 funded new wallet</span>' : '';
+  return `<tr class="${e.alert || e.new_allocation || e.new_wallet ? 'alert' : ''}"><td class="l">${time(e.ts)}</td>
     ${showWallet ? `<td class="l">${chip(e.group)} ${e.label}</td>` : ''}
-    <td class="l ${e.kind}">${e.kind}</td><td class="l">${tok}</td><td>${amt(e.amount)}</td><td>${paid}</td>
+    <td class="l ${e.kind}">${e.kind}</td><td class="l">${tok}</td><td>${amt(e.amount)}</td><td>${paid}${badge}</td>
     <td>${usd(e.usd)}</td><td>${px(e.price)}</td><td>${usd(e.market_cap)}</td>
     <td>${solscan('tx', e.sig, e.sig.slice(0, 8) + '…')}</td></tr>`;
 }

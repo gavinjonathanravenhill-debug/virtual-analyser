@@ -422,6 +422,14 @@ class Tracker:
             self.seen.add((e["sig"], e["wallet"]))
             self.last_tx[e["wallet"]] = max(self.last_tx.get(e["wallet"], 0), e["ts"])
         enrich(evs)
+        try:
+            flag_new_allocations(evs)
+        except Exception as ex:
+            self.status["last_error"] = f"allocation watch: {ex}"
+        try:   # first poll just records each funder's nonce; later polls scan the new blocks
+            evs += watch_funders((self.last_block + 1) if self.last_block else latest, latest)
+        except Exception as ex:
+            self.status["last_error"] = f"funding watch: {ex}"
         with self.lock:
             for e in sorted(evs, key=lambda e: e["ts"]):
                 self.events.appendleft(e)
@@ -657,3 +665,90 @@ def profile(address, depth=40):
              f"aren't available - open it on {CFG['explorer_name']} for full history.")
     _prof[a] = (time.time(), out)
     return out
+
+
+# ------------------------------------------------ allocation + funding watch ----
+_known = set()          # (wallet, token) pairs already checked
+_nonce = {}             # funder -> last seen nonce
+
+
+def _balance_at(token, owner, block):
+    raw = rpc("eth_call", [{"to": token, "data": "0x70a08231" + "0" * 24 + owner[2:]}, hex(block)])
+    return int(raw, 16) if raw and raw != "0x" else 0
+
+
+def _dex(mint):
+    return f"https://dexscreener.com/{DEXSCREENER}/{mint}"
+
+
+def flag_new_allocations(evs):
+    """A watched wallet receiving a token it held none of the block before = new allocation (market-making deal)."""
+    import solana_signals as sig
+    for e in evs:
+        w = WALLETS.get(e["wallet"]) or {}
+        if not w.get("watch_new_tokens") or e["kind"] not in ("IN", "BUY") or e.get("mint") in QUOTES:
+            continue
+        if e.get("counterparty") in EXCHANGES:        # withdrawal from an exchange is a purchase, not a deal
+            continue
+        k = (e["wallet"], e["mint"])
+        if k in _known:
+            continue
+        _known.add(k)
+        try:
+            before = _balance_at(e["mint"], e["wallet"], e["block"] - 1)
+        except Exception:
+            continue                                   # node has no state for that block - can't tell
+        if before:
+            continue
+        e["new_allocation"] = True
+        sig.alert(("alloc", CHAIN, e["sig"], e["mint"]),
+                  f"🆕 <b>NEW TOKEN ALLOCATION: {e.get('symbol') or e['mint'][:8]}</b> [{NAME}]\n"
+                  f"{w.get('label')} received {e['amount']:,.0f} ({sig.fmt_usd(e.get('usd'))}) - first time it has held this token.\n"
+                  f"Likely a new market-making deal (listing / launch support). mcap {sig.fmt_usd(e.get('market_cap'))}\n"
+                  f"From {e.get('counterparty_label') or e.get('counterparty')}\n{_dex(e['mint'])}\n{EXPLORER_TX}{e['sig']}")
+
+
+def watch_funders(frm, to):
+    """Native-coin sends from 'funder' wallets to brand-new addresses -> start tracking the new wallet."""
+    import solana_signals as sig
+    out = []
+    for a, w in list(WALLETS.items()):
+        if not w.get("funder"):
+            continue
+        n = int(rpc("eth_getTransactionCount", [a, "latest"]), 16)
+        prev = _nonce.get(a)
+        _nonce[a] = n
+        if prev is None or n <= prev:
+            continue                                   # it hasn't sent anything since last poll
+        for b in range(max(frm, to - 400), to + 1):    # scan the new blocks for its transactions
+            blk = rpc("eth_getBlockByNumber", [hex(b), True]) or {}
+            for tx in blk.get("transactions") or []:
+                if (tx.get("from") or "").lower() != a or not tx.get("to"):
+                    continue
+                dest, val = tx["to"].lower(), int(tx.get("value") or "0x0", 16)
+                if val == 0 or dest in WALLETS or dest in EXCHANGES:
+                    continue
+                if int(rpc("eth_getTransactionCount", [dest, "latest"]), 16) > 0 or is_contract(dest):
+                    continue                           # not a fresh wallet
+                amount = val / 1e18
+                label = f"Wintermute (auto) {dest[:6]}…{dest[-4:]}"
+                sig.add_wallet(sys_mod(), dest, label, w.get("group") or "Wintermute",
+                               f"Auto-added: funded by {w.get('label')} with {amount:.4f} {NATIVE} "
+                               f"in block {b} ({tx['hash'][:10]}…) - same pattern that created Wintermute 4",
+                               True, 100000)
+                ep = eth_usd() or 0
+                out.append({"sig": tx["hash"], "ts": int(blk.get("timestamp", "0x0"), 16), "block": b, "wallet": a,
+                            "kind": "OUT", "mint": NATIVE, "symbol": NATIVE, "amount": amount, "usd": amount * ep,
+                            "counterparty": dest, "counterparty_label": "NEW wallet - now tracked",
+                            "new_wallet": True, "label": w.get("label"), "group": w.get("group"),
+                            "alert": True, "min_usd": w.get("min_usd")})
+                sig.alert(("funded", CHAIN, dest),
+                          f"🐣 <b>{w.get('label')} funded a NEW wallet</b> [{NAME}]\n{dest}\n"
+                          f"{amount:.4f} {NATIVE} - now tracked automatically (group {w.get('group')}).\n"
+                          f"{EXPLORER}/address/{dest}")
+    return out
+
+
+def sys_mod():
+    import sys
+    return sys.modules[__name__]

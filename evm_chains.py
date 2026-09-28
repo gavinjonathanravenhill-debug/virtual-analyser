@@ -25,9 +25,11 @@ _WM = [
      "note": "Etherscan 'Wintermute 4' - largest ETH balance; exchange deposits/withdrawals are the signal"},
     {"address": "0xce84449a8ebec019ac110a4b6662e55d0fd9f228", "label": "Wintermute 5",
      "group": "Wintermute", "alert": True, "min_usd": 100000, "note": "Etherscan 'Wintermute 5'"},
-    {"address": "0xdbf5e9c5206d0db70a90108bf936da60221dc080", "label": "Wintermute 0xdbf…080",
+    {"address": "0xdbf5e9c5206d0db70a90108bf936da60221dc080", "label": "Wintermute 0xdbf…080 (allocations)",
      "group": "Wintermute", "alert": True, "min_usd": 100000,
-     "note": "Etherscan 'Wintermute: 0xdbf...080' - receives project market-making allocations"},
+     "watch_new_tokens": True,   # first-ever receipt of a token = likely a new market-making deal
+     "funder": True,             # it funded Wintermute 4 - new wallets it funds get tracked automatically
+     "note": "Etherscan 'Wintermute: 0xdbf...080' - receives project market-making allocations; funded Wintermute 4"},
     {"address": "0x000002cba8dfb0a86a47a415592835e17fac080a", "label": "Wintermute 2",
      "group": "Wintermute", "alert": False, "note": "Etherscan 'Wintermute 2' - mostly dormant"},
 ]
