@@ -1,11 +1,14 @@
 """X news feed: a slide-out panel injected into every HTML page.
 
-Two modes:
-  * X_BEARER_TOKEN set  -> /api/xfeed pulls recent posts from the X API v2
-                           (query from X_FEED_QUERY), cached to save API reads.
-  * no token            -> the panel shows embedded X timelines for the
-                           accounts in X_FEED_ACCOUNTS (free, no API key).
+Sources (merged, newest first):
+  * Telegram mirrors (free, no key) - the same accounts post everything to public
+    Telegram channels; read from t.me/s/<channel>. Set X_FEED_TELEGRAM to change them.
+  * X API v2 - only if X_BEARER_TOKEN is set AND the plan allows reading posts
+    (X's free tier doesn't; Basic does). Errors are shown, the Telegram posts still load.
+The old embedded X timelines were dropped: X blanks them for most visitors now.
 """
+import html as _html
+import re
 import os
 import time
 import threading
@@ -24,6 +27,10 @@ X_FEED_QUERY = os.environ.get(
     "(" + " OR ".join(f"from:{a}" for a in X_FEED_ACCOUNTS) + ") -is:retweet",
 )
 CACHE_SECONDS = int(os.environ.get("X_FEED_CACHE_SECONDS", "120"))
+# channel:display handle - display handle is what the tabs show (matches the X account)
+X_FEED_TELEGRAM = [c.strip() for c in os.environ.get(
+    "X_FEED_TELEGRAM", "WatcherGuru:WatcherGuru,whale_alert_io:whale_alert,lookonchainchannel:lookonchain"
+).split(",") if c.strip()]
 
 _cache = {"ts": 0, "data": None}
 _lock = threading.Lock()
@@ -63,22 +70,85 @@ def _fetch_api():
     return posts
 
 
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _clean(fragment):
+    t = re.sub(r"<br\s*/?>", "\n", fragment)
+    t = _TAG.sub("", t)
+    return _html.unescape(t).strip()
+
+
+def _fetch_telegram(channel, handle):
+    """Latest posts from a public Telegram channel's web preview (t.me/s/<channel>)."""
+    r = requests.get(f"https://t.me/s/{channel}", timeout=10,
+                     headers={"User-Agent": "Mozilla/5.0 (compatible; virtual-analyser)"})
+    r.raise_for_status()
+    page = r.text
+    name = re.search(r'class="tgme_channel_info_header_title"[^>]*>\s*<span[^>]*>(.*?)</span>', page, re.S)
+    name = _clean(name.group(1)) if name else handle
+    avatar = re.search(r'class="tgme_page_photo_image[^"]*"[^>]*>\s*<img src="([^"]+)"', page, re.S)
+    posts = []
+    for chunk in page.split('data-post="')[1:]:
+        post_id = chunk.split('"', 1)[0]
+        body = re.search(r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', chunk, re.S)
+        when = re.search(r'<time datetime="([^"]+)"', chunk)
+        if not body or not when:
+            continue
+        text = _clean(body.group(1))
+        if not text:
+            continue
+        views = re.search(r'class="tgme_widget_message_views">([^<]+)<', chunk)
+        posts.append({
+            "id": "tg-" + post_id, "text": text, "created_at": when.group(1),
+            "username": handle, "name": name, "avatar": avatar.group(1) if avatar else "",
+            "likes": views.group(1).strip() + " views" if views else "", "reposts": "",
+            "url": f"https://t.me/{post_id}", "source": "Telegram",
+        })
+    return posts[-20:]
+
+
+def _fetch_all():
+    posts, errors = [], []
+    for item in X_FEED_TELEGRAM:
+        channel, _, handle = item.partition(":")
+        try:
+            posts += _fetch_telegram(channel, handle or channel)
+        except Exception as e:
+            errors.append(f"Telegram {channel}: {str(e)[:80]}")
+    if X_BEARER_TOKEN:
+        try:
+            posts += [{**p, "source": "X"} for p in _fetch_api()]
+        except Exception as e:
+            msg = str(e)
+            if "403" in msg or "401" in msg:
+                msg = "X API refused (the free X plan can't read posts - Basic plan needed). Showing Telegram posts."
+            errors.append(msg[:160])
+    posts.sort(key=lambda p: p.get("created_at") or "", reverse=True)
+    return posts[:80], errors
+
+
 @xfeed_bp.route("/api/xfeed")
 def xfeed_api():
-    if not X_BEARER_TOKEN:
-        return jsonify({"mode": "embed", "accounts": X_FEED_ACCOUNTS})
     with _lock:
         fresh = _cache["data"] is not None and time.time() - _cache["ts"] < CACHE_SECONDS
         if not fresh:
-            try:
-                _cache["data"] = _fetch_api()
+            posts, errors = _fetch_all()
+            if posts or _cache["data"] is None:     # keep the last good copy if everything failed
+                _cache["data"] = posts
                 _cache["ts"] = time.time()
-                _cache.pop("error", None)
-            except Exception as e:  # keep serving the last good copy
-                _cache["error"] = str(e)[:200]
+            _cache["error"] = " · ".join(errors) or None
+        handles = []
+        for item in X_FEED_TELEGRAM:
+            h = item.partition(":")[2] or item.partition(":")[0]
+            if h not in handles:
+                handles.append(h)
+        for a in (X_FEED_ACCOUNTS if X_BEARER_TOKEN else []):
+            if a not in handles:
+                handles.append(a)
         return jsonify({
             "mode": "api",
-            "accounts": X_FEED_ACCOUNTS,
+            "accounts": handles,
             "posts": _cache["data"] or [],
             "updated": _cache["ts"],
             "error": _cache.get("error"),
@@ -129,9 +199,9 @@ XFEED_WIDGET = r"""
     var posts=(cfg.posts||[]).filter(function(p){return filter==='ALL'||p.username.toLowerCase()===filter.toLowerCase()});
     var h=posts.map(function(p){return '<a class="xf-post" href="'+esc(p.url)+'" target="_blank" rel="noopener">'+
       '<div class="xf-who">'+(p.avatar?'<img src="'+esc(p.avatar)+'" alt="">':'')+'<b>'+esc(p.name)+'</b><span>@'+esc(p.username)+' · '+ago(p.created_at)+'</span></div>'+
-      '<div class="xf-text">'+esc(p.text)+'</div><div class="xf-meta">♥ '+p.likes+'  ⟲ '+p.reposts+'</div></a>'}).join('');
+      '<div class="xf-text">'+esc(p.text)+'</div><div class="xf-meta">'+(p.source==='Telegram'?esc(p.likes)+' · via Telegram':'♥ '+p.likes+'  ⟲ '+p.reposts)+'</div></a>'}).join('');
     if(!h)h='<div class="xf-note">No posts yet.</div>';
-    if(cfg.error)h='<div class="xf-note">X API error: '+esc(cfg.error)+'</div>'+h;
+    if(cfg.error)h='<div class="xf-note">'+esc(cfg.error)+'</div>'+h;
     body.innerHTML=h;
   }
   function renderEmbed(){
