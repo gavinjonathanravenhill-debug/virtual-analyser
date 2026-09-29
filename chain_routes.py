@@ -123,6 +123,35 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
             return out
         return safe(build)
 
+    # ---- new / migrated coins scanner (Solana + Robinhood Chain) ----
+    import migrated as mg
+    if name in mg.CHAINS:
+        @bp.route(f"{api}/migrated")
+        def migrated_list():
+            start()
+            mg.start()
+            return safe(lambda: mg.summary(name))
+
+        @bp.route(f"{api}/migrated/scan", methods=["POST"])
+        def migrated_scan():
+            import threading
+            import time as _t
+            threading.Thread(target=lambda: mg._status.setdefault(name, {}).update(
+                last_result=mg.scan(name), last=int(_t.time())), daemon=True).start()
+            return jsonify({"started": True})
+
+        @bp.route(f"{api}/migrated/analyse")
+        def migrated_analyse():
+            mint = norm((request.args.get("mint") or "").strip())
+            if not addr_ok(mint):
+                return bad("Paste a token address")
+            return safe(lambda: mg.analyse(mint, interactive=True, chain=name))
+
+        @bp.route(f"{api}/migrated/track", methods=["POST"])
+        def migrated_track():
+            d = request.get_json(force=True) or {}
+            return safe(lambda: mg.track_wallets(norm(d.get("mint")), d.get("which") or "operators", chain=name))
+
     @bp.route(f"{api}/bots", methods=["GET", "POST", "DELETE"])
     def bots_route():
         if request.method == "POST":

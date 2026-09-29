@@ -1,17 +1,17 @@
 """
-Migrated-coin scanner (Solana) - the "Migrated" column of Axiom / GMGN, with the Audit filters built in,
-plus forensics on manipulation spikes.
+Migrated / new-coin scanner for Solana AND Robinhood Chain - the "Migrated" column of Axiom / GMGN with the
+Audit filters built in, plus forensics on manipulation spikes.
 
-  Discovery  - GeckoTerminal new pools on the DEXes pump.fun / LetsBonk coins graduate to (free, no key)
-  Metrics    - liquidity, mcap, volume, buys/sells, unique buyers, price change (GeckoTerminal, batched)
-  Audit      - bundlers %, snipers %, insiders %, dev %, top-10 %, holders, LP burned, authorities
-               (Solana Tracker Data API - set SOLANATRACKER_API_KEY; free tier = 2.5k calls/month, so audits
-               are capped per day and only run on coins that already pass the metric filters)
-  Spikes     - 1-minute candles: finds volume+price outlier candles, classifies the move
-               (pump & dump / held / still running), and from the pool's recent trades names the wallets
-               that bought BEFORE the spike and the ones that SOLD INTO it, plus wash-trading share.
-  Alerts     - "clean migration passes filters" and "manipulation spike" (group "Migrated", so they can go
-               to the digest), one-click "track these wallets".
+  Discovery  - GeckoTerminal: newest pools, each launch DEX's busiest pools (<24h old) and trending pools
+               Solana: pump.fun / LetsBonk graduates (PumpSwap, Meteora, Raydium)
+               Robinhood Chain: pons / bankr / clanker launches and their Uniswap v2/v3/v4 pools
+  Metrics    - liquidity, mcap, volume, buys/sells, unique buyers, price change (+ DexScreener where GT is blind)
+  Audit      - Solana: Solana Tracker (bundlers/snipers/insiders/dev/top10) when SOLANATRACKER_API_KEY is set
+               Robinhood: Blockscout (holders, top-10 wallets, dev holding)
+               both:  snipers + bundles measured from the pool's first trades (GeckoTerminal)
+  Spikes     - 1-minute candles: volume+price outliers, pattern (pump & dump / held / running), wallets that
+               bought before the spike / sold into it, wash + bot share
+  Alerts     - "clean coin passes filters" and "manipulation spike" (group "Migrated"), one-click tracking
 """
 
 import json
@@ -20,7 +20,7 @@ import statistics
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 
 import requests
 
@@ -30,11 +30,20 @@ import solana_signals as sig
 GT = "https://api.geckoterminal.com/api/v2"
 ST = "https://data.solanatracker.io"
 ST_KEY = os.getenv("SOLANATRACKER_API_KEY", "").strip()
-GT_GAP = float(os.getenv("GT_GAP_SECONDS", "6.5"))     # free GeckoTerminal ~10 calls/min
 SCAN_SECONDS = int(os.getenv("MIGRATED_SCAN_SECONDS", "300"))
+
+CHAINS = {
+    "solana": {"gt": "solana", "dex_key": "mg_dexes", "name": "Solana", "fill_dexes": ("meteora",)},
+    "robinhood": {"gt": "robinhood", "dex_key": "rh_dexes", "name": "Robinhood Chain",
+                  "blockscout": "https://robinhoodchain.blockscout.com/api/v2",
+                  "fill_dexes": ("uniswap-v4", "pons")},
+}
 
 edge.DEFAULTS.update({
     "mg_dexes": ["pumpswap", "meteora-damm-v2", "raydium-cpmm"],
+    "rh_dexes": ["uniswap-v4-robinhood", "uniswap-v3-robinhood", "uniswap-v2-robinhood", "pons-v2-dex",
+                 "bankr-robinhood", "clanker-robinhood"],
+    "rh_enabled": True,
     "mg_max_age_h": 24,
     "mg_min_liq": 15000,
     "mg_min_mcap": 40000,
@@ -54,8 +63,19 @@ edge.DEFAULTS.update({
     "mg_alerts": "both",             # clean | spikes | both | off
 })
 edge._set_cache[1] = None   # settings cached before these defaults existed must be rebuilt
-
 _s = requests.Session()
+
+
+def module(chain):
+    """The chain's tracker module (token_info, WALLETS, links...)."""
+    m = sig.CHAINS.get(chain)
+    if m:
+        return m
+    if chain == "solana":
+        import solana_client as sc
+        return sc
+    import evm_chains
+    return evm_chains.CHAINS[chain]
 
 
 # ------------------------------------------------------------ fetchers ----
@@ -74,6 +94,12 @@ def st(path):
     r = _s.get(ST + path, headers={"x-api-key": ST_KEY}, timeout=20)
     if r.status_code in (401, 403, 429):
         raise RuntimeError(f"Solana Tracker said {r.status_code} (key / monthly limit)")
+    r.raise_for_status()
+    return r.json()
+
+
+def bs(chain, path, **params):
+    r = _s.get(CHAINS[chain]["blockscout"] + path, params=params, timeout=20)
     r.raise_for_status()
     return r.json()
 
@@ -124,16 +150,19 @@ def init_tables():
             mint TEXT PRIMARY KEY, pool TEXT, symbol TEXT, name TEXT, dex TEXT, created REAL, first_seen REAL,
             metrics TEXT, audit TEXT, audited_at REAL, spike TEXT, spiked_at REAL, status TEXT, reasons TEXT,
             alerted TEXT DEFAULT '')""")
+        if "chain" not in [r[1] for r in c.execute("PRAGMA table_info(migrated)")]:
+            c.execute("ALTER TABLE migrated ADD COLUMN chain TEXT DEFAULT 'solana'")
 
 
 def _save(row):
     with sig._db_lock, sig.db() as c:
-        c.execute("""INSERT INTO migrated (mint, pool, symbol, name, dex, created, first_seen, metrics, status, reasons)
-                     VALUES (?,?,?,?,?,?,?,?,?,?)
+        c.execute("""INSERT INTO migrated (mint, pool, symbol, name, dex, created, first_seen, metrics, status, reasons, chain)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?)
                      ON CONFLICT(mint) DO UPDATE SET pool=excluded.pool, symbol=excluded.symbol,
                      metrics=excluded.metrics, status=excluded.status, reasons=excluded.reasons""",
                   (row["mint"], row["pool"], row["symbol"], row.get("name"), row.get("dex"), row.get("created"),
-                   time.time(), json.dumps(row), row.get("status"), json.dumps(row.get("reasons") or [])))
+                   time.time(), json.dumps(row), row.get("status"), json.dumps(row.get("reasons") or []),
+                   row.get("chain") or "solana"))
 
 
 def _set(mint, **kw):
@@ -143,11 +172,14 @@ def _set(mint, **kw):
                   [json.dumps(v) if isinstance(v, (dict, list)) else v for v in kw.values()] + [mint])
 
 
-def load(hours=None):
+def load(hours=None, chain="solana"):
+    init_tables()
     s = edge.settings()
     since = time.time() - (hours or s["mg_max_age_h"]) * 3600
     with sig._db_lock, sig.db() as c:
-        rows = [dict(r) for r in c.execute("SELECT * FROM migrated WHERE created>=? OR first_seen>=?", (since, since))]
+        rows = [dict(r) for r in c.execute(
+            "SELECT * FROM migrated WHERE (created>=? OR first_seen>=?) AND COALESCE(chain,'solana')=?",
+            (since, since, chain))]
     for r in rows:
         for k in ("metrics", "audit", "spike", "reasons"):
             r[k] = json.loads(r[k]) if r.get(k) else None
@@ -155,24 +187,24 @@ def load(hours=None):
 
 
 # ------------------------------------------------------------- filters ----
-def _fill_from_dexscreener(pools):
-    """GeckoTerminal reports $0 liquidity (and odd early price changes) for Meteora pools - use DexScreener there."""
-    need = [p for p in pools if not p.get("liq") or (p.get("dex") or "").startswith("meteora")]
+def _fill_from_dexscreener(pools, chain):
+    """GeckoTerminal reports $0 / junk liquidity for some pool types (Meteora, Uniswap v4) - use DexScreener there."""
+    need = [p for p in pools if not p.get("liq") or (p.get("dex") or "").startswith(CHAINS[chain]["fill_dexes"])]
     if not need:
         return
     try:
-        import solana_client as sc
-        info = sc.token_info([p["mint"] for p in need])
+        info = module(chain).token_info([p["mint"] for p in need])
     except Exception as e:
         print(f"dexscreener fill failed: {e}")
         return
     for p in need:
-        t = info.get(p["mint"]) or {}
+        t = info.get(p["mint"]) or info.get(p["mint"].lower()) or {}
         if t.get("liquidity"):
             p["liq"] = t["liquidity"]
             p["liq_src"] = "dexscreener"
-        elif not p.get("liq"):
-            p["liq"] = None            # unknown - never treated as "pulled"
+        else:
+            p["liq"] = None            # GT can't be trusted for these pools and DexScreener doesn't know it yet:
+            p["liq_src"] = "unknown"   # unknown - never treated as "pulled"
         if t.get("market_cap"):
             p["mcap"] = t["market_cap"]
         if t.get("change_1h") is not None:
@@ -236,7 +268,7 @@ def _pct(obj, *keys):
     return None
 
 
-def audit(mint):
+def audit_st(mint):
     j = st(f"/tokens/{mint}")
     if not j:
         return None
@@ -261,6 +293,85 @@ def audit(mint):
     return a
 
 
+
+
+def early_buyers(chain, pool, created, supply):
+    """Snipers / bundles from the pool's own first trades: buys in the first 60 s, and buys landing in the very
+    first block. Only works while the pool's ~300 most recent trades still reach back to its start."""
+    if not supply:
+        return None
+    j = gt(f"/networks/{CHAINS[chain]['gt']}/pools/{pool}/trades")
+    trs = []
+    for d in j.get("data") or []:
+        a = d.get("attributes") or {}
+        trs.append({"t": _ts(a.get("block_timestamp")), "kind": a.get("kind"), "block": a.get("block_number"),
+                    "wallet": edge._norm(a.get("tx_from_address")),
+                    "tokens": _num(a.get("to_token_amount")) if a.get("kind") == "buy" else 0})
+    trs = sorted([t for t in trs if t["t"]], key=lambda t: t["t"])
+    if not trs or (len(trs) >= 290 and created and trs[0]["t"] > created + 120):
+        return None     # history doesn't reach the launch any more
+    t0 = min(created or trs[0]["t"], trs[0]["t"])
+    buys = [t for t in trs if t["kind"] == "buy" and t["tokens"] and not edge.is_bot(t["wallet"])]
+    early = [t for t in buys if t["t"] <= t0 + 60]
+    first_block = buys[0]["block"] if buys else None
+    fb = [t for t in buys if t["block"] == first_block] if first_block is not None else []
+    fb_wallets = {t["wallet"] for t in fb}
+    return {"snipers": sum(t["tokens"] for t in early) / supply * 100, "sniper_wallets": len({t["wallet"] for t in early}),
+            "bundlers": (sum(t["tokens"] for t in fb) / supply * 100) if len(fb_wallets) >= 2 else 0.0,
+            "bundle_wallets": len(fb_wallets) if len(fb_wallets) >= 2 else 0}
+
+
+def audit_blockscout(chain, mint):
+    """Holders, top-10 wallets (contracts like the pool left out) and dev holding from the chain explorer."""
+    tok = bs(chain, f"/tokens/{mint}")
+    dec = int(tok.get("decimals") or 18)
+    supply = int(tok.get("total_supply") or 0) / 10 ** dec
+    holders = tok.get("holders_count") or tok.get("holders")
+    items = (bs(chain, f"/tokens/{mint}/holders").get("items") or [])
+    creator = (bs(chain, f"/addresses/{mint}").get("creator_address_hash") or "").lower()
+    wallets = [(h["address"]["hash"].lower(), int(h.get("value") or 0) / 10 ** dec) for h in items
+               if not (h.get("address") or {}).get("is_contract")]
+    top10 = sum(v for _, v in wallets[:10]) / supply * 100 if supply else None
+    dev = sum(v for a, v in wallets if a == creator) / supply * 100 if supply and creator else None
+    return {"holders": int(holders) if holders else None, "top10": top10, "dev": dev if dev is not None else 0.0,
+            "creator": creator, "supply": supply, "source": "blockscout"}
+
+
+def audit(chain, row):
+    """Best audit available for the chain. Always adds launch snipers / bundles from the trades."""
+    a = None
+    if chain == "solana" and ST_KEY:
+        a = audit_st(row["mint"])
+    elif chain != "solana":
+        try:
+            a = audit_blockscout(chain, row["mint"])
+        except Exception as e:
+            print(f"blockscout audit failed: {e}")
+    if a is None:
+        a = {}
+        try:     # holders / top-10 from GeckoTerminal token info when there's no better source
+            gi = sig.geckoterminal_info(CHAINS[chain]["gt"], row["mint"])
+            h = gi.get("holders") or {}
+            a["holders"] = h.get("count")
+            t10 = (h.get("distribution_percentage") or {}).get("top_10")
+            a["top10"] = float(t10) if t10 is not None else None
+        except Exception:
+            pass
+    supply = a.get("supply") or ((row.get("mcap") or 0) / row["price"] if row.get("price") else None)
+    try:
+        eb = early_buyers(chain, row["pool"], row.get("created"), supply)
+    except Exception as e:
+        eb = None
+        print(f"early-buyer check failed: {e}")
+    if eb:
+        if a.get("snipers") is None:
+            a["snipers"] = eb["snipers"]
+        if a.get("bundlers") is None:
+            a["bundlers"] = eb["bundlers"]
+        a["launch"] = eb
+    return a or None
+
+
 def audit_reasons(a, s):
     if not a:
         return []
@@ -280,7 +391,9 @@ def audit_reasons(a, s):
 _audits_today = {"day": None, "n": 0}
 
 
-def _audit_budget():
+def _audit_budget(chain):
+    if chain != "solana" or not ST_KEY:
+        return True          # Blockscout / GeckoTerminal audits aren't metered
     s = edge.settings()
     day = time.strftime("%Y-%m-%d")
     if _audits_today["day"] != day:
@@ -289,20 +402,20 @@ def _audit_budget():
 
 
 # --------------------------------------------------------------- spikes ---
-def candles(pool, limit=360, interactive=False):
-    j = gt(f"/networks/solana/pools/{pool}/ohlcv/minute", interactive=interactive, aggregate=1, limit=limit,
-           currency="usd", token="base")
+def candles(pool, limit=360, interactive=False, chain="solana"):
+    j = gt(f"/networks/{CHAINS[chain]['gt']}/pools/{pool}/ohlcv/minute", interactive=interactive, aggregate=1,
+           limit=limit, currency="usd", token="base")
     rows = ((j.get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []
     return sorted([{"t": r[0], "o": r[1], "h": r[2], "l": r[3], "c": r[4], "v": r[5]} for r in rows], key=lambda x: x["t"])
 
 
-def trades(pool, interactive=False):
-    j = gt(f"/networks/solana/pools/{pool}/trades", interactive=interactive)
+def trades(pool, interactive=False, chain="solana"):
+    j = gt(f"/networks/{CHAINS[chain]['gt']}/pools/{pool}/trades", interactive=interactive)
     out = []
     for d in j.get("data") or []:
         a = d.get("attributes") or {}
         out.append({"t": _ts(a.get("block_timestamp")), "kind": a.get("kind"), "usd": _num(a.get("volume_in_usd")) or 0,
-                    "wallet": a.get("tx_from_address"), "tx": a.get("tx_hash")})
+                    "wallet": edge._norm(a.get("tx_from_address")), "tx": a.get("tx_hash")})
     return sorted([t for t in out if t["t"]], key=lambda x: x["t"])
 
 
@@ -411,12 +524,12 @@ def manipulation_score(an, a):
     return min(100, sum(pts.values())), pts
 
 
-def analyse(mint=None, pool=None, interactive=False):
+def analyse(mint=None, pool=None, interactive=False, chain="solana"):
     """Full spike forensics for one coin (on demand or from the scanner)."""
     init_tables()
+    net = CHAINS[chain]["gt"]
     if not pool:
-        j = gt(f"/networks/solana/tokens/{mint}/pools", interactive=interactive, page=1)
-        ps = parse_pools(j)
+        ps = parse_pools(gt(f"/networks/{net}/tokens/{mint}/pools", interactive=interactive, page=1))
         if not ps:
             raise RuntimeError("No DEX pool found for that token")
         best = max(ps, key=lambda p: p.get("liq") or 0)
@@ -424,12 +537,12 @@ def analyse(mint=None, pool=None, interactive=False):
         info = best
     else:
         info = {}
-    cs = candles(pool, interactive=interactive)
+    cs = candles(pool, interactive=interactive, chain=chain)
     spikes = find_spikes(cs)
-    trs = trades(pool, interactive=interactive)
+    trs = trades(pool, interactive=interactive, chain=chain)
     main = max(spikes, key=lambda s: (s["high"] / s["pre"] if s["pre"] else 0) * s["vol_x"]) if spikes else None
-    out = {"mint": mint, "pool": pool, "info": info, "candles": cs[-240:], "spikes": spikes, "spike": main,
-           "analysed_at": time.time()}
+    out = {"mint": mint, "pool": pool, "chain": chain, "info": info, "candles": cs[-240:], "spikes": spikes,
+           "spike": main, "analysed_at": time.time()}
     if main:
         pattern, run, giveback = classify(main, cs)
         out.update(pattern=pattern, run_pct=run, giveback_pct=giveback, forensics=forensics(main, trs))
@@ -440,42 +553,47 @@ def analyse(mint=None, pool=None, interactive=False):
     a = json.loads(r["audit"]) if r and r["audit"] else None
     out["manipulation"], out["manipulation_parts"] = manipulation_score(out, a)
     out["audit"] = a
-    _set(mint, spike={k: v for k, v in out.items() if k != "candles"}, spiked_at=time.time()) if r else None
+    if r:
+        _set(mint, spike={k: v for k, v in out.items() if k != "candles"}, spiked_at=time.time())
     return out
 
 
 # ---------------------------------------------------------------- scan ----
-def scan():
+def scan(chain="solana"):
     init_tables()
     s = edge.settings()
-    dexes = {d.lower() for d in s["mg_dexes"]}
+    net = CHAINS[chain]["gt"]
+    dexes = {d.lower() for d in s[CHAINS[chain]["dex_key"]]}
     found = []
     for page in (1, 2, 3):
         try:
-            found += parse_pools(gt("/networks/solana/new_pools", page=page, include="base_token,dex"))
+            found += parse_pools(gt(f"/networks/{net}/new_pools", page=page, include="base_token,dex"))
         except Exception as e:
-            print(f"migrated scan (new pools) failed: {e}")
+            print(f"{chain} scan (new pools) failed: {e}")
             break
-    # ~20 new pools a minute (mostly pump.fun curves), so also pull each migration DEX's busiest pools of the
-    # last 24h - that's where the migrations that actually trade show up, even if we missed their first minutes
+    # new pools arrive faster than we can page, so also pull each launch DEX's busiest pools (last 24h)
+    # and the trending pools - that's where the new coins that actually trade show up
     for dex in list(dexes)[:4]:
         try:
-            found += parse_pools(gt(f"/networks/solana/dexes/{dex}/pools", page=1, sort="h24_tx_count_desc",
+            found += parse_pools(gt(f"/networks/{net}/dexes/{dex}/pools", page=1, sort="h24_tx_count_desc",
                                     include="base_token,dex"))
         except Exception as e:
-            print(f"migrated scan ({dex}) skipped: {e}")
+            print(f"{chain} scan ({dex}) skipped: {e}")
+    try:
+        found += parse_pools(gt(f"/networks/{net}/trending_pools", page=1, include="base_token,dex"))
+    except Exception as e:
+        print(f"{chain} trending skipped: {e}")
     fresh = [p for p in found if (p.get("dex") or "").lower() in dexes
              and time.time() - (p.get("created") or 0) <= s["mg_max_age_h"] * 3600]
-    known = {r["mint"]: r for r in load()}
-    # refresh metrics for coins already on the list (30 pools per call)
-    stale = [r["pool"] for m, r in known.items() if m not in {p["mint"] for p in fresh}]
+    known = {r["mint"]: r for r in load(chain=chain)}
+    stale = [r["pool"] for m, r in known.items() if m not in {p["mint"] for p in fresh} and r.get("status") != "rugged"]
     for i in range(0, min(len(stale), 60), 30):
         try:
-            fresh += parse_pools(gt("/networks/solana/pools/multi/" + ",".join(stale[i:i + 30]), include="base_token,dex"))
+            fresh += parse_pools(gt(f"/networks/{net}/pools/multi/" + ",".join(stale[i:i + 30]), include="base_token,dex"))
         except Exception as e:
-            print(f"migrated refresh failed: {e}")
-    uniq = {p["mint"]: p for p in fresh}
-    _fill_from_dexscreener(list(uniq.values()))
+            print(f"{chain} refresh failed: {e}")
+    uniq = {p["mint"]: {**p, "chain": chain} for p in fresh}
+    _fill_from_dexscreener(list(uniq.values()), chain)
     results = []
     for p in uniq.values():
         prev = known.get(p["mint"]) or {}
@@ -488,10 +606,11 @@ def scan():
         why = metric_reasons(p, s)
         row = {**p, "reasons": why}
         a = prev.get("audit")
-        if not why and not a and ST_KEY and _audit_budget():
+        if not why and not a and _audit_budget(chain):
             try:
-                a = audit(p["mint"])
-                _audits_today["n"] += 1
+                a = audit(chain, p)
+                if chain == "solana" and ST_KEY:
+                    _audits_today["n"] += 1
             except Exception as e:
                 print(f"audit failed: {e}")
             if a:
@@ -501,39 +620,42 @@ def scan():
         row["status"] = "pass" if not row["reasons"] else "fail"
         _save(row)
         results.append((row, a, prev))
-    # spike forensics: coins moving hard on volume right now (keeps GeckoTerminal calls small)
-    movers = sorted((r for r, _, _ in results if r.get("status") != "rugged" and (abs(r.get("chg_m5") or 0) >= 20 or abs(r.get("chg_1h") or 0) >= 60)
-                     and (r.get("vol_1h") or 0) >= 10000), key=lambda r: -abs(r.get("chg_m5") or 0))[:3]
+    movers = sorted((r for r, _, _ in results if r.get("status") != "rugged" and (abs(r.get("chg_m5") or 0) >= 20
+                     or abs(r.get("chg_1h") or 0) >= 60) and (r.get("vol_1h") or 0) >= 10000),
+                    key=lambda r: -abs(r.get("chg_m5") or 0))[:3]
     spiked = {}
     for r in movers:
         prev = known.get(r["mint"]) or {}
         if prev.get("spiked_at") and time.time() - prev["spiked_at"] < 1800:
             continue
         try:
-            spiked[r["mint"]] = analyse(r["mint"], r["pool"])
+            spiked[r["mint"]] = analyse(r["mint"], r["pool"], chain=chain)
         except Exception as e:
             print(f"spike analysis failed: {e}")
-    _alerts(results, spiked, s)
+    _alerts(results, spiked, s, chain)
     return {"seen": len(found), "migrated": len(results), "pass": sum(r["status"] == "pass" for r, _, _ in results),
             "spikes": len(spiked)}
 
 
-def _alerts(results, spiked, s):
+def _alerts(results, spiked, s, chain):
     mode = s["mg_alerts"]
     if mode == "off":
         return
-    import solana_client as sc
+    m = module(chain)
+    tag = CHAINS[chain]["name"]
     for row, a, prev in results:
         if row["status"] != "pass" or "clean" in (prev.get("alerted") or "") or mode == "spikes":
             continue
-        aud = (f"bundlers {a.get('bundlers') or 0:.0f}% · snipers {a.get('snipers') or 0:.0f}% · insiders "
-               f"{a.get('insiders') or 0:.0f}% · dev {a.get('dev') or 0:.0f}% · top10 {a.get('top10') or 0:.0f}% · "
-               f"{a.get('holders') or '?'} holders") if a else "audit: add SOLANATRACKER_API_KEY for bundler/sniper checks"
+        if a:
+            bits = [f"{k} {a[k]:.0f}%" for k in ("bundlers", "snipers", "insiders", "dev", "top10") if a.get(k) is not None]
+            aud = " · ".join(bits + [f"{a.get('holders') or '?'} holders"])
+        else:
+            aud = "audit unavailable"
         sig.alert(("mg-clean", row["mint"]),
-                  f"🆕 <b>MIGRATED {row['symbol']}</b> passes your filters\n"
+                  f"🆕 <b>NEW {row['symbol']}</b> [{tag}] passes your filters\n"
                   f"mcap {sig.fmt_usd(row.get('mcap'))} · liq {sig.fmt_usd(row.get('liq'))} · 1h vol {sig.fmt_usd(row.get('vol_1h'))}"
-                  f" · {row.get('buyers_1h')} buyers · 1h {row.get('chg_1h') or 0:+.0f}%\n{aud}\n"
-                  f"{edge.links_html(sc, row['mint'], row.get('pool'))}", group="Migrated")
+                  f" · {row.get('buyers_1h')} buyers · 1h {row.get('chg_1h') or 0:+.0f}% · {row.get('dex')}\n{aud}\n"
+                  f"{edge.links_html(m, row['mint'], row.get('pool'))}", group="Migrated")
         _set(row["mint"], alerted=(prev.get("alerted") or "") + "clean,")
     if mode == "clean":
         return
@@ -543,61 +665,65 @@ def _alerts(results, spiked, s):
         f = an["forensics"]
         sym = (an.get("info") or {}).get("symbol") or next((r["symbol"] for r, _, _ in results if r["mint"] == mint), mint[:6])
         sig.alert(("mg-spike", mint, int(an["spike"]["start"])),
-                  f"🎢 <b>MANIPULATION SPIKE {sym}</b> score {an['manipulation']}/100\n"
+                  f"🎢 <b>MANIPULATION SPIKE {sym}</b> [{tag}] score {an['manipulation']}/100\n"
                   f"{an['spike']['vol_x']:.0f}x volume · +{an.get('run_pct') or 0:.0f}% · pattern: <b>{an.get('pattern')}</b>"
                   f"{' (gave back ' + format(an.get('giveback_pct') or 0, '.0f') + '%)' if an.get('giveback_pct') is not None else ''}\n"
                   f"{len(f['pre_buyers'])} wallets loaded in the hour before · {len(f['operators'])} bought-before AND sold-into it"
                   f" · wash ~{f['wash_pct']:.0f}% · bots {f.get('bot_pct', 0):.0f}% · top wallet {f['top_wallet_pct']:.0f}% of volume\n"
                   f"{', '.join(k for k in an['manipulation_parts'])}\n"
-                  f"{edge.links_html(sc, mint, an['pool'])}", group="Migrated")
+                  f"{edge.links_html(m, mint, an['pool'])}", group="Migrated")
 
 
-def track_wallets(mint, which="operators", group="Spike insiders"):
-    """Add the pre-spike buyers / operators of a coin to the Solana tracker."""
-    import solana_client as sc
+def track_wallets(mint, which="operators", group="Spike insiders", chain="solana"):
+    """Add the pre-spike buyers / operators of a coin to that chain's tracker."""
+    m = module(chain)
     with sig._db_lock, sig.db() as c:
         r = c.execute("SELECT symbol, spike FROM migrated WHERE mint=?", (mint,)).fetchone()
-    an = json.loads(r["spike"]) if r and r["spike"] else analyse(mint)
+    an = json.loads(r["spike"]) if r and r["spike"] else analyse(mint, chain=chain)
     f = an.get("forensics") or {}
     ws = f.get("operators") if which == "operators" else [x["wallet"] for x in f.get("pre_buyers") or [] if not x.get("bot")]
-    ws = [w for w in ws or [] if not edge.is_bot(w)]
+    ws = [edge._norm(w) for w in ws or [] if not edge.is_bot(w)]
     sym = (r["symbol"] if r else None) or mint[:6]
     added = []
-    for w in (ws or [])[:15]:
-        if w in sc.WALLETS:
+    for w in ws[:15]:
+        if w in m.WALLETS:
             continue
-        sig.add_wallet(sc, w, f"{sym} {'operator' if which == 'operators' else 'pre-spike'} {w[:4]}", group,
+        sig.add_wallet(m, w, f"{sym} {'operator' if which == 'operators' else 'pre-spike'} {w[:6]}", group,
                        note=f"{'bought before + sold into' if which == 'operators' else 'bought before'} the {sym} spike",
                        alert_on=True, min_usd=1000)
         added.append(w)
-    try:
-        import helius_hook
-        helius_hook.resync_async()
-    except Exception:
-        pass
-    return {"added": added, "skipped": len(ws or []) - len(added)}
+    if chain == "solana":
+        try:
+            import helius_hook
+            helius_hook.resync_async()
+        except Exception:
+            pass
+    return {"added": added, "skipped": len(ws) - len(added)}
 
 
-def summary():
+def summary(chain="solana"):
     s = edge.settings()
-    rows = load()
+    rows = load(chain=chain)
     rank = {"pass": 0, "pending": 1, "fail": 2, "rugged": 3}
     rows.sort(key=lambda r: (rank.get(r["status"], 2), -((r.get("metrics") or {}).get("vol_1h") or 0)))
     out = []
     for r in rows[:150]:
-        m = r.get("metrics") or {}
+        mt = r.get("metrics") or {}
         sp = r.get("spike") or {}
-        out.append({**{k: m.get(k) for k in ("symbol", "name", "pool", "dex", "created", "mcap", "liq", "vol_1h",
-                                             "buyers_1h", "buys_1h", "sells_1h", "chg_m5", "chg_1h", "price")},
+        out.append({**{k: mt.get(k) for k in ("symbol", "name", "pool", "dex", "created", "mcap", "liq", "vol_1h",
+                                              "buyers_1h", "buys_1h", "sells_1h", "chg_m5", "chg_1h", "price")},
                     "mint": r["mint"], "status": r["status"], "reasons": r.get("reasons") or [], "audit": r.get("audit"),
                     "pattern": sp.get("pattern"), "manipulation": sp.get("manipulation"), "spiked_at": r.get("spiked_at")})
     counts = {k: sum(1 for r in rows if r["status"] == k) for k in ("pass", "fail", "rugged")}
     import gt_limit
-    return {"rows": out, "st_key": bool(ST_KEY), "counts": counts, "gt": gt_limit.status(), "audits_today": _audits_today["n"], "status": _status,
-            "settings": {k: v for k, v in s.items() if k.startswith("mg_")}}
+    st_ = _status.get(chain) or {}
+    return {"rows": out, "chain": chain, "st_key": bool(ST_KEY), "audit_source":
+            ("Solana Tracker" if ST_KEY else "launch trades + GeckoTerminal holders") if chain == "solana" else "Blockscout + launch trades",
+            "counts": counts, "gt": gt_limit.status(), "audits_today": _audits_today["n"], "status": st_,
+            "settings": {k: v for k, v in s.items() if k.startswith("mg_") or k.startswith("rh_")}}
 
 
-_status = {"last": None, "last_result": None, "error": None}
+_status = {}
 _started = False
 
 
@@ -611,10 +737,13 @@ def start():
     def loop():
         time.sleep(20)
         while True:
-            try:
-                _status.update(last_result=scan(), last=int(time.time()), error=None)
-            except Exception as e:
-                _status["error"] = str(e)[:200]
+            chains = ["solana"] + (["robinhood"] if edge.settings().get("rh_enabled") else [])
+            for ch in chains:
+                st_ = _status.setdefault(ch, {})
+                try:
+                    st_.update(last_result=scan(ch), last=int(time.time()), error=None)
+                except Exception as e:
+                    st_["error"] = str(e)[:200]
             time.sleep(SCAN_SECONDS)
     if not os.getenv("MIGRATED_SCANNER_OFF"):
         threading.Thread(target=loop, daemon=True, name="migrated").start()
