@@ -179,6 +179,20 @@ class CoinGecko:
                           "usd_market_cap": mc if mc and mc < 5e12 else None,
                           "usd_24h_vol": (p.get("volume") or {}).get("h24"),
                           "usd_24h_change": (p.get("priceChange") or {}).get("h24")}
+        # DexScreener returns a limited number of pairs per request, so coins with many pairs (PEPE, LINK...)
+        # crowd others (UNI, LDO, ZRO...) out - fill the gaps from DefiLlama (free, 100s per call)
+        missing = [c for c in contracts if not (out.get(c) or {}).get("usd")]
+        for i in range(0, len(missing), 80):
+            try:
+                r = requests.get("https://coins.llama.fi/prices/current/" +
+                                 ",".join("ethereum:" + c for c in missing[i:i + 80]), timeout=20)
+                for k, v in (r.json().get("coins") or {}).items():
+                    c = k.split(":", 1)[1].lower()
+                    if v.get("price") and (v.get("confidence") or 1) >= 0.8:
+                        out[c] = {**(out.get(c) or {}), "usd": float(v["price"]), "source": "defillama"}
+                        out[c].setdefault("usd_market_cap", None)
+            except Exception:
+                continue
         return out
 
     def eth_price(self):
@@ -380,6 +394,8 @@ class WintermuteAnalyzer:
             sign = 1 if r["direction"] == "IN" else -1
             n["net"] += sign * r["amount"]
             n["net_usd"] += sign * (r["usd"] or 0)
+            if r["usd"] is None and r["amount"]:
+                n["unpriced"] = True
             n["in" if sign > 0 else "out"] += 1
             ex = KNOWN_EXCHANGES.get(r["counterparty"])
             if ex:

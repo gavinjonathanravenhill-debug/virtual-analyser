@@ -204,7 +204,7 @@ async function loadOverview() {
         <div class="card"><h3>Net token flows (click a row for price impact)</h3>
           <table><tr><th>Token</th><th>Net amount</th><th>Net USD</th><th>In / Out</th></tr>
           ${d.net_flows.map(f => `<tr class="click" onclick="showImpact('${f.contract}')">
-            <td>${f.symbol}</td><td>${num(f.net)}</td><td>${sUsd(f.net_usd)}</td>
+            <td>${f.symbol}</td><td>${num(f.net)}</td><td>${f.unpriced && !f.net_usd ? '<span class="dim" title="No price found for this token">no price</span>' : sUsd(f.net_usd)}</td>
             <td class="dim">${f.in} / ${f.out}</td></tr>`).join('') || '<tr><td colspan=4 class="dim">No external flows</td></tr>'}
           </table></div>
         <div>
