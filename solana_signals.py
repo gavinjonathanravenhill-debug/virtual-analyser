@@ -58,6 +58,8 @@ def init_db():
             chain TEXT, sig TEXT, wallet TEXT, mint TEXT, ts INTEGER, symbol TEXT, label TEXT, grp TEXT,
             venue TEXT, usd REAL, sign INTEGER, market_cap REAL, PRIMARY KEY (chain, sig, wallet, mint))""")
         c.execute("CREATE INDEX IF NOT EXISTS flows_mint_ts ON flows (chain, mint, ts)")
+        import edge
+        edge.init_tables(c)
         c.execute("""CREATE TABLE IF NOT EXISTS flow_alerts (
             chain TEXT, mint TEXT, sign INTEGER, bucket INTEGER, ts INTEGER, PRIMARY KEY (chain, mint, sign))""")
 
@@ -149,15 +151,14 @@ def remove_wallet(m, address):
 _sent = set()
 
 
-def alert(key, text):
-    """Telegram (if configured) - each key only once per process."""
+def alert(key, text, prio="normal", group=None):
+    """Telegram (if configured) - each key only once per process. Quiet hours / digests via edge.dispatch."""
     if key in _sent:
         return
     _sent.add(key)
     try:
-        import bot
-        if bot.BOT_TOKEN:
-            bot.send(text)
+        import edge
+        edge.dispatch(text, prio, group)
     except Exception as e:
         print(f"telegram alert failed: {e}")
 
@@ -177,6 +178,9 @@ def is_signal(e, m):
         return False
     usd = e.get("usd") or 0
     floor = e.get("min_usd")  # optional per-wallet threshold (e.g. $250k for a busy treasury)
+    if not floor:
+        import edge
+        floor = edge.group_min(e.get("group"))
     if not e.get("alert"):
         return False
     if e.get("to_exchange") or e.get("from_exchange"):
@@ -283,9 +287,21 @@ def on_new_events(events, m):
     except Exception as ex:
         print(f"flow record failed: {ex}")
         flow_mints = set()
+    import edge
     fresh = [e for e in events if is_signal(e, m) and now - (e.get("ts") or 0) <= FRESH_SECONDS]
+    traded = [e for e in events if e.get("kind") in ("BUY", "SELL") and e.get("mint") not in (None, m.NATIVE)
+              and e["mint"] not in m.QUOTES]
+    live = {}
+    if traded or fresh:
+        for mint in {e["mint"] for e in traded + fresh if e.get("mint")}:
+            m._tok.pop(mint, None)   # live price for the chase verdict / copy entry
+        live = m.token_info(list({e["mint"] for e in traded + fresh if e.get("mint")}))
+        try:
+            edge.record_trades(traded, m, live)
+        except Exception as ex:
+            print(f"copytrade record failed: {ex}")
     if fresh:
-        info = m.token_info([e["mint"] for e in fresh])
+        info = live
         pending = []   # alerts are built after the DB lock is released (the flow summary reads the DB)
         with _db_lock, db() as c:
             for e in fresh:
@@ -302,18 +318,29 @@ def on_new_events(events, m):
                     arrow = f"🏦 WITHDREW FROM {(e.get('counterparty_label') or 'EXCHANGE').upper()} (restocking / accumulating)"
                 pending.append((e, arrow, p0))
         for e, arrow, p0 in pending:
-            flow = ""
-            if e.get("to_exchange") or e.get("from_exchange"):
-                try:
+            flow, prefix, send, prio = "", "", True, "normal"
+            t = info.get(e["mint"]) or {}
+            try:
+                if e.get("to_exchange") or e.get("from_exchange"):
                     flow = flow_line(m, e["mint"], e.get("symbol")) + "\n"
-                except Exception as ex:
-                    print(f"flow line failed: {ex}")
+                elif e["kind"] == "BUY":
+                    prefix, extra, send, _, _ = edge.buy_extra(m, e, t)
+                    flow = extra + "\n"
+                elif e["kind"] == "SELL":
+                    flow = edge.sell_extra(m, e, t) + "\n"
+                    held = e["mint"].lower() in edge.my_holdings(m)
+                    if held:
+                        prefix, prio = "⚠️ YOU HOLD THIS - ", "high"
+            except Exception as ex:
+                print(f"alert extras failed: {ex}")
+            if not send:
+                continue   # risk-gated or auto-muted: still in the journal, just not pinged
             alert(("sig", e["sig"], e["wallet"]),
-                  f"{arrow} <b>{e.get('symbol')}</b> {fmt_usd(e.get('usd'))} [{m.CHAIN}]\n"
+                  f"{prefix}{arrow} <b>{e.get('symbol')}</b> {fmt_usd(e.get('usd'))} [{m.CHAIN}]\n"
                   f"{e['label']} ({e['group']})\n"
                   f"mcap {fmt_usd(e.get('market_cap'))} · price {e.get('price') or p0}\n"
                   f"{flow}"
-                  f"{m.EXPLORER_TX}{e['sig']}")
+                  f"{m.EXPLORER_TX}{e['sig']}", prio=prio, group=e.get("group"))
     for cl in clusters(m):
         if cl["fresh"]:
             alert(("cluster", m.CHAIN, cl["mint"], len(cl["wallets"])),
@@ -324,6 +351,14 @@ def on_new_events(events, m):
         check_flow_alerts(m, flow_mints)
     except Exception as ex:
         print(f"flow alert failed: {ex}")
+    try:
+        edge.check_exits(events, m)
+    except Exception as ex:
+        print(f"exit check failed: {ex}")
+    try:
+        edge.check_confluence(m, {e["mint"] for e in traded if e["kind"] == "BUY"})
+    except Exception as ex:
+        print(f"confluence check failed: {ex}")
     check_levels(m)
 
 
@@ -601,6 +636,8 @@ def start_signals():
         return
     _started = True
     init_db()
+    import edge
+    edge.start()
 
     def loop():
         while True:

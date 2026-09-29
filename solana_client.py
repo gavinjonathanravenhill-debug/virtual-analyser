@@ -269,8 +269,53 @@ class Tracker:
         self.last_tx = {}       # wallet -> blockTime of newest tx (any kind)
         self.checked = set()    # wallets scanned at least once
         self.listeners = []     # callbacks(new_events) - e.g. signal journal / alerts
-        self.status = {"started": None, "last_poll": None, "last_error": None, "polls": 0, "rpc": RPC_NAME}
+        self.status = {"started": None, "last_poll": None, "last_error": None, "polls": 0, "rpc": RPC_NAME,
+                       "webhook_hits": 0, "last_webhook": None}
         self.lock = threading.Lock()
+        self.seen_lock = threading.Lock()
+
+    def _claim(self, key):
+        """True the first time a (signature, wallet) is seen - safe across the poller and the webhook."""
+        with self.seen_lock:
+            if key in self.seen:
+                return False
+            self.seen.add(key)
+            return True
+
+    def _publish(self, new):
+        enrich(new)
+        with self.lock:
+            for e in sorted(new, key=lambda e: e["ts"]):
+                self.events.appendleft(e)
+        for fn in self.listeners:
+            try:
+                fn(new)
+            except Exception as e:
+                self.status["last_error"] = f"listener: {e}"
+
+    def ingest(self, txs):
+        """Helius raw webhook: transactions arrive already in getTransaction shape - parse them straight away."""
+        new = []
+        for tx in txs or []:
+            try:
+                keys = tx["transaction"]["message"]["accountKeys"]
+                keys = [k["pubkey"] if isinstance(k, dict) else k for k in keys]
+                owners = {b.get("owner") for side in ("preTokenBalances", "postTokenBalances")
+                          for b in (tx.get("meta") or {}).get(side) or []}
+                sig_ = tx["transaction"]["signatures"][0]
+            except Exception:
+                continue
+            for addr in (set(keys) | owners) & set(WALLETS):
+                if not self._claim((sig_, addr)):
+                    continue
+                ev = parse_tx(tx, addr)
+                if ev:
+                    new.append(ev)
+                    self.last_tx[addr] = max(self.last_tx.get(addr) or 0, ev["ts"] or 0)
+        self.status.update(webhook_hits=self.status["webhook_hits"] + 1, last_webhook=int(time.time()))
+        if new:
+            self._publish(new)
+        return len(new)
 
     def poll_wallet(self, addr, limit=SIGS_PER_POLL):
         sigs = signatures(addr, limit, self.last_sig.get(addr))
@@ -282,9 +327,8 @@ class Tracker:
         out = []
         for s in sigs:
             key = (s["signature"], addr)
-            if s.get("err") or key in self.seen:
+            if s.get("err") or not self._claim(key):
                 continue
-            self.seen.add(key)
             ev = parse_tx(get_tx(s["signature"]), addr)
             if ev:
                 out.append(ev)
@@ -297,16 +341,8 @@ class Tracker:
                 new += self.poll_wallet(addr)
             except Exception as e:
                 self.status["last_error"] = f"{WALLETS[addr]['label']}: {e}"
-        enrich(new)
-        with self.lock:
-            for e in sorted(new, key=lambda e: e["ts"]):
-                self.events.appendleft(e)
         self.status.update(last_poll=int(time.time()), polls=self.status["polls"] + 1)
-        for fn in self.listeners:
-            try:
-                fn(new)
-            except Exception as e:
-                self.status["last_error"] = f"listener: {e}"
+        self._publish(new)
         return new
 
     def loop(self):

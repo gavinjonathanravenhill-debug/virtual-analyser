@@ -86,6 +86,7 @@
   <button data-t="feed" class="on">Feed</button>
   <button data-t="profile">Wallet profiler</button>
   <button data-t="flows">MM ↔ Robinhood</button>
+  <button data-t="edge">🔥 Edge</button>
   <button data-t="signals">Signals</button>
   <button data-t="wallets">Wallets</button>
   <button data-t="lookup">Lookup</button>
@@ -139,6 +140,18 @@
     <div class="card"><h3>Robinhood hot wallet → storage sweeps</h3><table id="fl-sweeps"></table>
       <div class="note">Robinhood keeps a small float in its hot wallet and sweeps the excess into storage.
         Steady sweeps <b>into</b> storage = customers holding more of that coin overall.</div></div>
+  </section>
+
+  <section class="tab" id="t-edge">
+    <div class="warn">Tools to decide faster, <b>not trade calls</b>. The copy test replays what you'd have made copying each wallet at the price
+      <b>we</b> saw when their trade landed (so our real delay is baked in), minus fees and pool slippage for your size. Needs a couple of weeks of data
+      before it means much; not financial advice.</div>
+    <div class="card" id="ed-hot"><h3>🔥 Hot now (confluence, 24h)</h3><div class="dim">Loading…</div></div>
+    <div class="card" id="ed-bt"><h3>🧪 Copy-trade test</h3><div class="dim">Loading…</div></div>
+    <div class="grid2">
+      <div class="card" id="ed-set"><h3>⚙️ Alert settings</h3><div class="dim">Loading…</div></div>
+      <div class="card" id="ed-rt"><h3>⚡ Real-time alerts</h3><div class="dim">Loading…</div></div>
+    </div>
   </section>
 
   <section class="tab" id="t-signals">
@@ -224,6 +237,7 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.id === 't-' + b.dataset.t));
   if (b.dataset.t === 'signals') loadSignals();
   if (b.dataset.t === 'flows') loadFlows();
+  if (b.dataset.t === 'edge') loadEdge();
 });
 ['#f-group', '#f-wallet', '#f-swaps', '#f-min'].forEach(s => $(s).onchange = loadFeed);
 
@@ -348,6 +362,69 @@ async function loadNetflow(h) {
       `<div class="dim" style="margin-top:6px">+ = pulled off exchanges (restocking / accumulating), − = sent to exchanges (likely sell). Telegram alert when 24h net passes ${usd(d.alert_usd)} or ${d.alert_pct}% of mcap (min ${usd(d.alert_floor)}), and again each time it doubles.</div>`;
   } catch (e) { $('#netflow').innerHTML = hdr + `<div class="err">Error: ${e.message}</div>`; }
 }
+
+// ---------- edge: hot list, copy-trade test, settings, real-time ----------
+const vcol = v => ({COPY: 'pos', MUTE: 'neg'})[v] || 'dim';
+const sgnp = v => v == null ? '–' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${(+v).toFixed(1)}%</span>`;
+async function loadEdge() {
+  try {
+    const d = await api(API + '/edge');
+    $('#ed-hot').innerHTML = '<h3>🔥 Hot now (confluence, 24h)</h3>' + (d.hot.length ? '<table><tr><th class="l">Token</th><th>Score</th><th>Buyers</th><th>Bought</th><th>Mcap</th><th>1h</th><th>Since 1st buy</th><th class="l">Why</th><th>Trade</th></tr>' +
+      d.hot.map(h => `<tr class="click" onclick="openToken('${h.mint}')"><td class="l">${h.symbol || short(h.mint)}</td>
+        <td><b class="${h.score >= 70 ? 'pos' : h.score < 40 ? 'neg' : ''}">${h.score}</b></td><td>${h.buyers}${h.copy_buyers ? ` <span class="pos">(${h.copy_buyers}🏅)</span>` : ''}</td>
+        <td>${usd(h.buy_usd)}</td><td>${usd(h.market_cap)}</td><td>${sgnp(h.change_1h)}</td><td>${sgnp(h.run_pct)}</td>
+        <td class="l dim" style="font-size:11px">${Object.entries(h.parts).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`).join(' · ')}</td>
+        <td onclick="event.stopPropagation()">${h.links.map(([n, u]) => `<a href="${u}" target="_blank">${n}</a>`).join(' ')}</td></tr>`).join('') + '</table>'
+      : '<div class="dim">Nothing yet - fills as your wallets buy (trades of $' + d.settings.copy_min_usd + '+ are recorded).</div>');
+    const b = d.backtest;
+    $('#ed-bt').innerHTML = `<h3>🧪 Copy-trade test - $${b.size} per trade, ${b.fee_pct}% fees + slippage</h3>` +
+      `<div class="dim" style="margin-bottom:6px">Total if you'd copied every recorded buy: <b class="${b.total_pnl >= 0 ? 'pos' : 'neg'}">${usd(b.total_pnl)}</b>. Exit = when they sold (or a 7-day time stop). 🏅 COPY = profitable after costs, MUTE = loses money copied (Telegram buys muted), LEARNING = fewer than ${d.settings.mute_min_trades} closed trades.</div>` +
+      (b.wallets.length ? '<table><tr><th class="l">Wallet</th><th>Verdict</th><th>Copied</th><th>Closed</th><th>Win</th><th>Avg</th><th>Median</th><th>P&amp;L</th><th>Best / worst</th><th>Avg hold</th><th>Your lag</th></tr>' +
+      b.wallets.map(w => `<tr><td class="l">${w.label} <span class="dim">${w.group || ''}</span></td><td><b class="${vcol(w.verdict)}">${w.verdict}</b></td>
+        <td>${w.copied}</td><td>${w.closed}</td><td>${w.win_pct == null ? '–' : w.win_pct.toFixed(0) + '%'}</td><td>${sgnp(w.avg_ret)}</td><td>${sgnp(w.median_ret)}</td>
+        <td class="${w.pnl_usd >= 0 ? 'pos' : 'neg'}">${usd(w.pnl_usd)}</td><td>${sgnp(w.best)} / ${sgnp(w.worst)}</td>
+        <td>${w.avg_hold_h == null ? '–' : w.avg_hold_h < 48 ? w.avg_hold_h.toFixed(1) + 'h' : (w.avg_hold_h / 24).toFixed(1) + 'd'}</td>
+        <td title="How much higher our entry was than theirs, on average">${sgnp(w.avg_chase)}</td></tr>`).join('') + '</table>'
+      : '<div class="dim">No copied trades yet - the test starts filling from the next buys your wallets make.</div>');
+    const s = d.settings;
+    const f = (id, label, val, hint = '') => `<label style="display:block;margin:6px 0"><span class="dim" style="display:inline-block;width:190px">${label}</span>
+      <input id="${id}" value="${val}" style="width:210px"> <span class="dim" style="font-size:11px">${hint}</span></label>`;
+    $('#ed-set').innerHTML = '<h3>⚙️ Alert settings</h3>' +
+      f('st-size', 'Your size per trade ($)', s.copy_size_usd, 'used for slippage + the copy test') +
+      f('st-fee', 'Round-trip fees (%)', s.fee_pct) +
+      f('st-late', 'Skip if already up (%)', s.late_pct, 'since their buy') +
+      f('st-slip', 'Skip if slippage over (%)', s.max_slip_pct) +
+      `<label style="display:block;margin:6px 0"><span class="dim" style="display:inline-block;width:190px">High-risk coins</span><select id="st-risk">
+        ${['block', 'tag', 'off'].map(o => `<option ${o === s.risk_gate ? 'selected' : ''}>${o}</option>`).join('')}</select></label>` +
+      `<label style="display:block;margin:6px 0"><span class="dim" style="display:inline-block;width:190px">Auto-mute losing wallets</span><input type="checkbox" id="st-mute" ${s.auto_mute ? 'checked' : ''}></label>` +
+      f('st-mutemin', 'Mute after N closed trades', s.mute_min_trades) +
+      f('st-gmin', 'Group minimums', Object.entries(s.group_min_usd || {}).map(([k, v]) => k + ':' + v).join(', '), 'e.g. fomo top:5000, Wintermute:25000') +
+      f('st-quiet', 'Quiet hours (UK)', s.quiet_hours, 'e.g. 00-07 - only exits/hot 85+ get through' + (d.quiet_now ? ' · <b>quiet now</b>' : '')) +
+      f('st-digest', 'Digest groups', (s.digest_groups || []).join(', '), 'groups: ' + d.groups.filter(Boolean).join(', ')) +
+      f('st-dmin', 'Digest every (min)', s.digest_minutes) +
+      f('st-conf', 'Hot alert at score', s.confluence_alert) +
+      f('st-mine', 'Coins I hold', (s.my_tokens || []).join(', '), 'token addresses - or add your wallet in group "Me"') +
+      `<div class="controls" style="margin-top:8px"><button onclick="saveSettings()">💾 Save</button><button onclick="flushDigest()">🗞 Send digest now</button></div>`;
+    const w = d.webhook;
+    $('#ed-rt').innerHTML = '<h3>⚡ Real-time alerts</h3>' + (w === undefined
+      ? `<div class="dim">This chain polls every ${CFG.rpc_note}. Push alerts are Solana-only (Helius).</div>`
+      : !w.api_key ? '<div class="warn">Set <code>HELIUS_API_KEY</code> on Railway, redeploy, then press the button here.</div>'
+      : `<div>${w.webhook_id ? `<b class="pos">ON</b> - Helius pushes trades from ${w.wallets} wallets in ~1-3 s.<br><span class="dim">${w.hits || 0} pushes this session${w.last ? ', last ' + ago(w.last) : ''}. Wallet list re-syncs when you add or remove one.</span>`
+          : '<b class="neg">OFF</b> - alerts wait for the 60 s poll.'}</div>
+         <div class="controls" style="margin-top:8px"><button onclick="setupHook()">${w.webhook_id ? '🔄 Re-sync webhook' : '⚡ Turn on real-time'}</button></div>`);
+  } catch (e) { $('#ed-hot').innerHTML = `<div class="err">Error: ${e.message}</div>`; }
+}
+async function saveSettings() {
+  const v = id => $('#' + id).value;
+  try {
+    await send('POST', API + '/settings', {copy_size_usd: v('st-size'), fee_pct: v('st-fee'), late_pct: v('st-late'), max_slip_pct: v('st-slip'),
+      risk_gate: v('st-risk'), auto_mute: $('#st-mute').checked, mute_min_trades: v('st-mutemin'), group_min_usd: v('st-gmin'),
+      quiet_hours: v('st-quiet'), digest_groups: v('st-digest'), digest_minutes: v('st-dmin'), confluence_alert: v('st-conf'), my_tokens: v('st-mine')});
+    alertBox('Settings saved'); loadEdge();
+  } catch (e) { alertBox(e.message); }
+}
+async function flushDigest() { try { const d = await send('POST', API + '/digest'); alertBox(d.sent + ' queued alerts sent'); } catch (e) { alertBox(e.message); } }
+async function setupHook() { try { await send('POST', '/api/solana/webhook/setup', {}); alertBox('Real-time webhook is on'); loadEdge(); } catch (e) { alertBox(e.message); } }
 
 function zoneForm(mint = '', price = null) {
   const v = id => (document.getElementById(id) || {}).value || '';
@@ -489,6 +566,7 @@ async function openToken(mint) {
   try {
     const d = await api(API + '/token/' + mint);
     const i = d.info || {};
+    $('#tk-links').innerHTML += (d.trade_links || []).filter(([n]) => n !== 'DexScreener').map(([n, u]) => btn(u, '💱 ' + n)).join('');
     const pct = v => v == null ? '–' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${(+v).toFixed(1)}%</span>`;
     const age = i.created ? ago(i.created / 1000).replace(' ago', '') : '–';
     const liqRatio = i.liquidity && i.market_cap ? (i.liquidity / i.market_cap * 100).toFixed(1) + '%' : '–';

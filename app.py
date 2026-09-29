@@ -75,6 +75,8 @@ from solana_routes import solana_bp
 
 @solana_bp.before_request
 def _solana_auth():
+    if request.path == "/api/solana/webhook":   # Helius push - checked against its own secret in the route
+        return None
     auth = request.authorization
     if not auth or not check_auth(auth.password):
         return Response("Login required", 401, {"WWW-Authenticate": "Basic realm=\"Virtual Analyser\""})

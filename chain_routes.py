@@ -4,6 +4,7 @@ import json
 
 from flask import Blueprint, jsonify, render_template, request
 
+import edge
 import solana_signals as sig
 
 
@@ -23,6 +24,14 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
     def bad(msg):
         return jsonify({"error": msg}), 400
 
+    def _resync():
+        if name == "solana":
+            try:
+                import helius_hook
+                helius_hook.resync_async()
+            except Exception as e:
+                print(f"helius resync skipped: {e}")
+
     @bp.route(f"/{name}")
     def page():
         start()
@@ -36,11 +45,15 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
             a = norm((d.get("address") or "").strip())
             if not addr_ok(a):
                 return bad(f"Not a valid {m.PAGE['addr_hint']}")
-            return safe(lambda: sig.add_wallet(m, a, d.get("label"), d.get("group"), d.get("note"), d.get("alert", True),
-                                               d.get("min_usd")))
+            res = safe(lambda: sig.add_wallet(m, a, d.get("label"), d.get("group"), d.get("note"), d.get("alert", True),
+                                              d.get("min_usd")))
+            _resync()
+            return res
         if request.method == "DELETE":
             a = norm((request.args.get("address") or "").strip())
-            return safe(lambda: {"removed": sig.remove_wallet(m, a)})
+            res = safe(lambda: {"removed": sig.remove_wallet(m, a)})
+            _resync()
+            return res
         ev = m.tracker.query(limit=3000)
         last, sizes = {}, {}
         for e in ev:
@@ -75,8 +88,13 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
         mint = norm(mint)
         if not addr_ok(mint):
             return bad("Not a valid token address")
-        return safe(lambda: {**m.token_report(mint), "risk": sig.risk_checks(m, mint),
-                             "levels": [lv for lv in sig.level_status(m) if lv["mint"] == mint]})
+        def rep_():
+            r = m.token_report(mint)
+            info = r.get("info") or {}
+            return {**r, "risk": sig.risk_checks(m, mint),
+                    "levels": [lv for lv in sig.level_status(m) if lv["mint"] == mint],
+                    "trade_links": edge.links(m, mint, info.get("pair"), info.get("url"))}
+        return safe(rep_)
 
     @bp.route(f"{api}/signals")
     def signals():
@@ -91,6 +109,27 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
         return safe(lambda: {"hours": hours, "rows": sig.net_flows(m, hours)[:100],
                              "alert_usd": sig.FLOW_ALERT_USD, "alert_pct": sig.FLOW_ALERT_PCT,
                              "alert_floor": sig.FLOW_ALERT_FLOOR})
+
+    @bp.route(f"{api}/edge")
+    def edge_route():
+        start()
+        def build():
+            out = {"hot": edge.confluence(m), "backtest": edge.backtest(m, request.args.get("size")),
+                   "settings": edge.settings(), "quiet_now": edge.quiet_now(), "groups": sorted(
+                       {(w.get("group") or "") for w in m.WALLETS.values()})}
+            if name == "solana":
+                import helius_hook
+                out["webhook"] = helius_hook.status()
+            return out
+        return safe(build)
+
+    @bp.route(f"{api}/settings", methods=["POST"])
+    def settings_route():
+        return safe(lambda: edge.save_settings(request.get_json(force=True) or {}))
+
+    @bp.route(f"{api}/digest", methods=["POST"])
+    def digest_route():
+        return safe(lambda: {"sent": edge.flush_digest(force=True)})
 
     @bp.route(f"{api}/insights")
     def insights():
