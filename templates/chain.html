@@ -200,6 +200,15 @@
   </section>
 
   <section class="tab" id="t-lookup">
+    <div class="card" id="ex-card" style="display:none"><h3>⬇️ Download trade history (CSV)</h3>
+      <div class="dim" style="margin-bottom:8px">The DexScreener transactions table for any date range, rebuilt from the chain: time, buy/sell, USD, tokens, SOL, price, trader, tx.
+        Uses your Helius key - keep busy coins to a few days at a time (capped at 100k rows).</div>
+      <div class="controls" style="flex-wrap:wrap;gap:6px;margin:0">
+        <input id="ex-mint" placeholder="Token address" style="flex:1;min-width:300px">
+        <input id="ex-from" type="date"> → <input id="ex-to" type="date">
+        <input id="ex-pool" placeholder="Pool (optional - defaults to the biggest)" style="min-width:240px">
+        <button onclick="exStart()">⬇️ Build CSV</button></div>
+      <div id="ex-out" style="margin-top:8px"></div></div>
     <div class="controls" style="margin:0 0 12px">
       <input id="tk-addr" placeholder="Paste any token address to screen it" style="flex:1;min-width:320px">
       <button onclick="openToken($('#tk-addr').value.trim())">Screen token</button>
@@ -444,6 +453,39 @@ async function saveSettings() {
 async function flushDigest() { try { const d = await send('POST', API + '/digest'); alertBox(d.sent + ' queued alerts sent'); } catch (e) { alertBox(e.message); } }
 async function setupHook() { try { await send('POST', '/api/solana/webhook/setup', {}); alertBox('Real-time webhook is on'); loadEdge(); } catch (e) { alertBox(e.message); } }
 
+// ---------- trade export ----------
+if (CFG.chain === 'solana') $('#ex-card').style.display = '';
+let exTimer = null;
+async function exStart(mint) {
+  if (mint) { $('#ex-mint').value = mint; document.querySelector('nav button[data-t="lookup"]').click(); $('#modal').classList.remove('on'); }
+  if (!$('#ex-from').value) { const d = new Date(); $('#ex-to').value = d.toISOString().slice(0, 10); d.setDate(d.getDate() - 1); $('#ex-from').value = d.toISOString().slice(0, 10); }
+  if (!mint && !$('#ex-mint').value.trim()) return;
+  if (mint && !confirm('Export trades for ' + $('#ex-from').value + ' → ' + $('#ex-to').value + '? (change the dates in the Lookup tab first if you want another range)')) return;
+  try {
+    const j = await send('POST', '/api/solana/export', {mint: $('#ex-mint').value.trim(), from: $('#ex-from').value, to: $('#ex-to').value, pool: $('#ex-pool').value.trim()});
+    clearInterval(exTimer); exTimer = setInterval(() => exPoll(j.id), 3000); exPoll(j.id);
+  } catch (e) { $('#ex-out').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+async function exPoll(id) {
+  try {
+    const j = await api('/api/solana/export/' + id);
+    const reach = j.reached ? new Date(j.reached * 1000).toISOString().slice(0, 16).replace('T', ' ') : '';
+    let h = `<b>${j.symbol || ''}</b> ${j.stage}` + (j.stage.startsWith('walking') ? ` - ${j.scanned.toLocaleString()} txs back, reached ${reach} UTC` : '') +
+      (j.stage === 'parsing swaps' ? ` - ${j.parsed.toLocaleString()} / ${j.found.toLocaleString()} (${j.rows.toLocaleString()} trades)` : '') +
+      (j.stage === 'error' ? ` <span class="err">${j.error}</span>` : '') +
+      (!['done', 'error'].includes(j.stage) ? ` <button onclick="send('POST','/api/solana/export/${id}/cancel')">Cancel</button>` : '');
+    if (j.stage === 'done') {
+      clearInterval(exTimer);
+      h += ` - <b>${j.rows.toLocaleString()} trades</b>${j.capped ? ' (hit the row cap - shorten the range)' : ''} <a href="/api/solana/export/${id}/csv"><button>⬇️ Download CSV</button></a>` +
+        (j.top_traders && j.top_traders.length ? '<h3 style="margin-top:10px">Biggest traders in this range</h3><table><tr><th class="l">Wallet</th><th>Trades</th><th>Bought</th><th>Sold</th><th>Net (sold - bought)</th><th></th></tr>' +
+          j.top_traders.map(t => `<tr><td class="l"><a href="${CFG.addr}${t.wallet}" target="_blank">${short(t.wallet)}</a></td><td>${t.n}</td><td>${usd(t.buys)}</td><td>${usd(t.sells)}</td>
+            <td class="${t.net >= 0 ? 'pos' : 'neg'}">${usd(t.net)}</td><td><button onclick="$('#lk-addr').value='${t.wallet}';runLookup()">Look up</button></td></tr>`).join('') + '</table>' : '');
+    }
+    if (j.stage === 'error') clearInterval(exTimer);
+    $('#ex-out').innerHTML = h;
+  } catch (e) { clearInterval(exTimer); $('#ex-out').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+
 // ---------- migrated coins ----------
 if (CFG.chain === 'solana') $('#tab-migrated').style.display = '';
 const pc0 = v => v == null ? '–' : (+v).toFixed(0) + '%';
@@ -664,7 +706,8 @@ async function openToken(mint) {
   $('#tk-links').innerHTML = btn(`https://v2.bubblemaps.io/map?address=${mint}&chain=${CFG.bubblemaps}`, '🫧 Bubblemaps (connected wallets)')
     + btn(`https://dexscreener.com/${CFG.dexscreener}/${mint}`, '📈 DexScreener')
     + btn(`${CFG.token}${mint}${CFG.holders_suffix}`, `Holders (${CFG.explorer_name})`)
-    + `<button onclick="zoneFromToken('${mint}')">🎯 Add price zone</button>`;
+    + `<button onclick="zoneFromToken('${mint}')">🎯 Add price zone</button>`
+    + (CFG.chain === 'solana' ? `<button onclick="exStart('${mint}')">⬇️ Trades CSV</button>` : '');
   $('#tk-body').innerHTML = '<div class="loading">Screening…</div>';
   try {
     const d = await api(API + '/token/' + mint);

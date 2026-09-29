@@ -79,3 +79,55 @@ def migrated_analyse():
 def migrated_track():
     d = request.get_json(force=True) or {}
     return _j(lambda: migrated.track_wallets(d.get("mint"), d.get("which") or "operators"))
+
+
+# ---- trade-history export (DexScreener "Transactions" table as CSV, any date range) ----
+import calendar as _cal  # noqa: E402
+import os as _os  # noqa: E402
+
+from flask import send_file  # noqa: E402
+
+import trade_export  # noqa: E402
+
+
+def _day(s, end=False):
+    t = _cal.timegm(__import__("time").strptime(s, "%Y-%m-%d"))
+    return t + 86399 if end else t
+
+
+@solana_bp.route("/api/solana/export", methods=["POST"])
+def export_start():
+    d = request.get_json(force=True) or {}
+    mint = (d.get("mint") or "").strip()
+    if not 32 <= len(mint) <= 44:
+        return jsonify({"error": "Paste the token address"}), 400
+    try:
+        a, b = _day(d.get("from")), _day(d.get("to"), end=True)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Pick a from and to date"}), 400
+    if b < a:
+        a, b = b, a
+    return jsonify(trade_export.start(mint, a, b, (d.get("pool") or "").strip() or None))
+
+
+@solana_bp.route("/api/solana/export/<job>")
+def export_status(job):
+    j = trade_export.JOBS.get(job)
+    if not j:
+        return jsonify({"error": "Unknown export (the server may have restarted)"}), 404
+    return jsonify({k: v for k, v in j.items() if k != "path"})
+
+
+@solana_bp.route("/api/solana/export/<job>/csv")
+def export_csv(job):
+    j = trade_export.JOBS.get(job)
+    if not j or not j.get("path") or not _os.path.exists(j["path"]):
+        return jsonify({"error": "File not ready"}), 404
+    return send_file(j["path"], mimetype="text/csv", as_attachment=True, download_name=j["file"])
+
+
+@solana_bp.route("/api/solana/export/<job>/cancel", methods=["POST"])
+def export_cancel(job):
+    if job in trade_export.JOBS:
+        trade_export.JOBS[job]["cancel"] = True
+    return jsonify({"ok": True})
