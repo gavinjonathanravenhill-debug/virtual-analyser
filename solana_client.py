@@ -379,6 +379,11 @@ def start_solana():
     import solana_signals as sig
     sig.start_signals()
     sig.register(sys.modules[__name__])  # page-added wallets + journal listener, before first poll
+    try:
+        import migrated
+        migrated.start()                 # migrated-coin scanner + spike forensics
+    except Exception as e:
+        print(f"migrated scanner failed to start: {e}")
     if os.getenv("SOLANA_TRACKER_OFF"):
         return
     threading.Thread(target=tracker.loop, daemon=True, name="solana-tracker").start()

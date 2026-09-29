@@ -36,3 +36,46 @@ def helius_setup():
         return jsonify(helius_hook.status())
     except Exception as e:
         return jsonify({"error": str(e)}), 502
+
+
+# ---- migrated coins (Axiom-style filters + manipulation-spike forensics) ----
+import threading as _th  # noqa: E402
+
+import migrated  # noqa: E402
+
+
+def _j(fn):
+    try:
+        return jsonify(fn())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+
+
+@solana_bp.route("/api/solana/migrated")
+def migrated_list():
+    sc.start_solana()
+    migrated.init_tables()
+    return _j(migrated.summary)
+
+
+@solana_bp.route("/api/solana/migrated/scan", methods=["POST"])
+def migrated_scan():
+    migrated.init_tables()
+    _th.Thread(target=lambda: migrated._status.update(last_result=migrated.scan(), last=int(__import__("time").time())),
+               daemon=True).start()
+    return jsonify({"started": True})
+
+
+@solana_bp.route("/api/solana/migrated/analyse")
+def migrated_analyse():
+    migrated.init_tables()
+    mint = (request.args.get("mint") or "").strip()
+    if not 32 <= len(mint) <= 44:
+        return jsonify({"error": "Paste a Solana token address"}), 400
+    return _j(lambda: migrated.analyse(mint))
+
+
+@solana_bp.route("/api/solana/migrated/track", methods=["POST"])
+def migrated_track():
+    d = request.get_json(force=True) or {}
+    return _j(lambda: migrated.track_wallets(d.get("mint"), d.get("which") or "operators"))

@@ -87,6 +87,7 @@
   <button data-t="profile">Wallet profiler</button>
   <button data-t="flows">MM ↔ Robinhood</button>
   <button data-t="edge">🔥 Edge</button>
+  <button data-t="migrated" id="tab-migrated" style="display:none">🆕 Migrated</button>
   <button data-t="signals">Signals</button>
   <button data-t="wallets">Wallets</button>
   <button data-t="lookup">Lookup</button>
@@ -152,6 +153,22 @@
       <div class="card" id="ed-set"><h3>⚙️ Alert settings</h3><div class="dim">Loading…</div></div>
       <div class="card" id="ed-rt"><h3>⚡ Real-time alerts</h3><div class="dim">Loading…</div></div>
     </div>
+  </section>
+
+  <section class="tab" id="t-migrated">
+    <div class="warn">Fresh pump.fun / LetsBonk graduates, run through <b>Axiom-style filters</b> (liquidity, mcap, volume, real buyers, bots) and an
+      <b>audit</b> (bundlers, snipers, insiders, dev, top 10 - needs <code>SOLANATRACKER_API_KEY</code>). Coins spiking hard get <b>forensics</b>: who loaded up
+      before the spike, who sold into it, and how much of the volume is wash. Most migrated coins go to zero - this filters junk, it doesn't find winners for you.</div>
+    <div class="card"><div class="controls" style="flex-wrap:wrap;gap:6px;margin:0">
+      <span id="mg-status" class="dim" style="flex:1">Loading…</span>
+      <label class="dim"><input type="checkbox" id="mg-passonly" checked onchange="loadMigrated()"> passing only</label>
+      <button onclick="mgScan()">🔄 Scan now</button>
+      <input id="mg-mint" placeholder="Any Solana token address → forensics" style="min-width:300px">
+      <button onclick="mgAnalyse($('#mg-mint').value.trim())">🔬 Analyse</button>
+      <button onclick="$('#mg-set').style.display = $('#mg-set').style.display === 'none' ? 'block' : 'none'">⚙️ Filters</button></div>
+      <div id="mg-set" style="display:none;margin-top:10px"></div></div>
+    <div class="card" id="mg-an" style="display:none"></div>
+    <div class="card"><table id="mg-table"><tr><td class="dim l">Loading…</td></tr></table></div>
   </section>
 
   <section class="tab" id="t-signals">
@@ -238,6 +255,7 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   if (b.dataset.t === 'signals') loadSignals();
   if (b.dataset.t === 'flows') loadFlows();
   if (b.dataset.t === 'edge') loadEdge();
+  if (b.dataset.t === 'migrated') loadMigrated();
 });
 ['#f-group', '#f-wallet', '#f-swaps', '#f-min'].forEach(s => $(s).onchange = loadFeed);
 
@@ -425,6 +443,91 @@ async function saveSettings() {
 }
 async function flushDigest() { try { const d = await send('POST', API + '/digest'); alertBox(d.sent + ' queued alerts sent'); } catch (e) { alertBox(e.message); } }
 async function setupHook() { try { await send('POST', '/api/solana/webhook/setup', {}); alertBox('Real-time webhook is on'); loadEdge(); } catch (e) { alertBox(e.message); } }
+
+// ---------- migrated coins ----------
+if (CFG.chain === 'solana') $('#tab-migrated').style.display = '';
+const pc0 = v => v == null ? '–' : (+v).toFixed(0) + '%';
+const aud = (a, k, lim) => !a || a[k] == null ? '<span class="dim">–</span>' : `<span class="${a[k] > lim ? 'neg' : 'pos'}">${(+a[k]).toFixed(0)}%</span>`;
+async function loadMigrated() {
+  try {
+    const d = await api('/api/solana/migrated');
+    const s = d.settings, st = d.status || {};
+    $('#mg-status').innerHTML = `${st.last ? 'Last scan ' + ago(st.last) : 'First scan runs ~20s after start, then every 5 min'}` +
+      (st.last_result ? ` · ${st.last_result.migrated} migrated coins, <b class="pos">${st.last_result.pass} pass</b>, ${st.last_result.spikes} spikes analysed` : '') +
+      ` · audits today ${d.audits_today}/${s.mg_audit_per_day}` + (d.st_key ? '' : ' · <b class="neg">no SOLANATRACKER_API_KEY - bundler/sniper audit off</b>') +
+      (st.error ? ` · <span class="err">${st.error}</span>` : '');
+    const rows = d.rows.filter(r => !$('#mg-passonly').checked || r.status === 'pass' || r.manipulation);
+    $('#mg-table').innerHTML = '<tr><th class="l">Token</th><th></th><th>Age</th><th>Mcap</th><th>Liq</th><th>1h vol</th><th>Buyers 1h</th><th>5m</th><th>1h</th>' +
+      '<th>Bundl.</th><th>Snipers</th><th>Insiders</th><th>Dev</th><th>Top10</th><th>Holders</th><th>Spike</th><th>Manip.</th></tr>' +
+      (rows.map(r => { const a = r.audit; return `<tr class="click" onclick="mgAnalyse('${r.mint}')" title="${(r.reasons || []).join(' · ').replace(/"/g, '')}">
+        <td class="l">${r.symbol || short(r.mint)} <span class="dim" style="font-size:10px">${r.dex || ''}</span></td>
+        <td>${r.status === 'pass' ? '✅' : '<span class="dim" title="' + (r.reasons || []).join(' · ').replace(/"/g, '') + '">❌</span>'}</td>
+        <td>${r.created ? ago(r.created).replace(' ago', '') : '–'}</td><td>${usd(r.mcap)}</td><td>${usd(r.liq)}</td><td>${usd(r.vol_1h)}</td>
+        <td>${r.buyers_1h ?? '–'}</td><td>${sgnp(r.chg_m5)}</td><td>${sgnp(r.chg_1h)}</td>
+        <td>${aud(a, 'bundlers', s.mg_max_bundlers)}</td><td>${aud(a, 'snipers', s.mg_max_snipers)}</td><td>${aud(a, 'insiders', s.mg_max_insiders)}</td>
+        <td>${aud(a, 'dev', s.mg_max_dev)}</td><td>${aud(a, 'top10', s.mg_max_top10)}</td><td>${a && a.holders != null ? a.holders : '–'}</td>
+        <td>${r.pattern ? `<b class="${r.pattern === 'held' ? 'pos' : r.pattern === 'running' ? '' : 'neg'}">${r.pattern}</b>` : '–'}</td>
+        <td>${r.manipulation != null ? `<b class="${r.manipulation >= 60 ? 'neg' : r.manipulation >= 30 ? '' : 'pos'}">${r.manipulation}</b>` : '–'}</td></tr>`; }).join('')
+       || '<tr><td colspan=17 class="dim l">Nothing passing yet - untick "passing only" to see everything the scanner saw.</td></tr>');
+    const f = (k, label) => `<label style="display:inline-block;margin:4px 10px 4px 0"><span class="dim">${label}</span> <input id="mgs-${k}" value="${Array.isArray(s[k]) ? s[k].join(', ') : s[k]}" style="width:${k === 'mg_dexes' ? 260 : 80}px"></label>`;
+    $('#mg-set').innerHTML = f('mg_max_age_h', 'Max age (h)') + f('mg_min_liq', 'Min liq $') + f('mg_min_mcap', 'Min mcap $') + f('mg_max_mcap', 'Max mcap $') +
+      f('mg_min_vol_1h', 'Min 1h vol $') + f('mg_min_buyers_1h', 'Min buyers 1h') + f('mg_max_tx_per_buyer', 'Max trades/wallet') + '<br>' +
+      f('mg_max_bundlers', 'Max bundlers %') + f('mg_max_snipers', 'Max snipers %') + f('mg_max_insiders', 'Max insiders %') + f('mg_max_dev', 'Max dev %') +
+      f('mg_max_top10', 'Max top10 %') + f('mg_min_holders', 'Min holders') + f('mg_audit_per_day', 'Audits/day') + '<br>' + f('mg_dexes', 'DEXes') +
+      `<label class="dim">Alerts <select id="mgs-mg_alerts">${['both', 'clean', 'spikes', 'off'].map(o => `<option ${o === s.mg_alerts ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
+       <button onclick="mgSave()">💾 Save filters</button>`;
+  } catch (e) { $('#mg-table').innerHTML = `<tr><td class="err l">Error: ${e.message}</td></tr>`; }
+}
+async function mgSave() {
+  const body = {};
+  document.querySelectorAll('[id^="mgs-"]').forEach(el => body[el.id.slice(4)] = el.value);
+  try { await send('POST', API + '/settings', body); alertBox('Filters saved - applied on the next scan'); loadMigrated(); } catch (e) { alertBox(e.message); }
+}
+async function mgScan() { try { await send('POST', '/api/solana/migrated/scan'); alertBox('Scanning - takes about a minute (free GeckoTerminal is rate limited)'); setTimeout(loadMigrated, 60000); } catch (e) { alertBox(e.message); } }
+function mgChart(cs, sp) {
+  const c = $('#mg-canvas'); if (!c || !cs.length) return;
+  const x = c.getContext('2d'), W = c.width = c.clientWidth * devicePixelRatio, H = c.height = 180 * devicePixelRatio;
+  const lo = Math.min(...cs.map(k => k.l)), hi = Math.max(...cs.map(k => k.h)), vmax = Math.max(...cs.map(k => k.v)) || 1;
+  const X = i => i / (cs.length - 1) * W, Y = p => H * 0.72 * (1 - (p - lo) / ((hi - lo) || 1)) + 6;
+  cs.forEach((k, i) => { x.fillStyle = 'rgba(120,140,200,.35)'; const h = k.v / vmax * H * 0.25; x.fillRect(X(i) - 1, H - h, 2, h); });
+  x.strokeStyle = '#7fff6e'; x.lineWidth = 1.5 * devicePixelRatio; x.beginPath(); cs.forEach((k, i) => i ? x.lineTo(X(i), Y(k.c)) : x.moveTo(X(i), Y(k.c))); x.stroke();
+  (sp || []).forEach(s => { const i = cs.findIndex(k => k.t >= s.start); if (i < 0) return; x.fillStyle = 'rgba(255,77,110,.25)';
+    const j = Math.max(i, cs.findIndex(k => k.t >= s.end)); x.fillRect(X(i) - 3, 0, Math.max(6, X(j) - X(i) + 6), H); });
+}
+async function mgAnalyse(mint) {
+  if (!mint) return;
+  const box = $('#mg-an'); box.style.display = 'block'; box.innerHTML = '<div class="loading">Pulling 1-minute candles and recent trades… (~15s)</div>';
+  box.scrollIntoView({behavior: 'smooth'});
+  try {
+    const d = await api('/api/solana/migrated/analyse?mint=' + encodeURIComponent(mint));
+    const f = d.forensics || {}, sp = d.spike, i = d.info || {};
+    const wl = (arr, cols) => arr && arr.length ? '<table>' + arr.map(w => `<tr><td class="l"><a href="${CFG.addr}${w.wallet}" target="_blank">${short(w.wallet)}</a></td>${cols(w)}</tr>`).join('') + '</table>' : '<div class="dim">none in the trades we can see</div>';
+    box.innerHTML = `<h3>🔬 ${i.symbol || short(d.mint)} forensics <span class="dim" style="font-size:12px">${short(d.mint)} · manipulation score <b class="${d.manipulation >= 60 ? 'neg' : d.manipulation >= 30 ? '' : 'pos'}">${d.manipulation}/100</b></span></h3>
+      <canvas id="mg-canvas" style="width:100%;height:180px"></canvas>
+      <div class="tiles">
+        <div class="tile"><div class="k">Pattern</div><div class="v">${d.pattern || 'no spike'}</div><div class="dim">${sp ? `+${(d.run_pct || 0).toFixed(0)}% on ${sp.vol_x.toFixed(0)}x volume` + (d.giveback_pct != null ? ` · gave back ${d.giveback_pct.toFixed(0)}%` : '') : 'last 4h of 1-min candles'}</div></div>
+        <div class="tile"><div class="k">Wash trading</div><div class="v">${pc0(f.wash_pct)}</div><div class="dim">volume from wallets both buying and selling</div></div>
+        <div class="tile"><div class="k">Top wallet</div><div class="v">${pc0(f.top_wallet_pct)}</div><div class="dim">of volume · ${f.trades_seen || 0} trades seen</div></div>
+        <div class="tile"><div class="k">Operators</div><div class="v">${(f.operators || []).length}</div><div class="dim">bought before AND sold into the spike</div></div>
+      </div>
+      <div class="dim" style="margin:6px 0">${Object.entries(d.manipulation_parts || {}).map(([k, v]) => k + ' +' + v).join(' · ') || 'no manipulation signs'}${d.audit ? ` · audit: bundlers ${pc0(d.audit.bundlers)}, snipers ${pc0(d.audit.snipers)}, insiders ${pc0(d.audit.insiders)}, dev ${pc0(d.audit.dev)}` : ''}</div>
+      <div class="grid2">
+        <div><h3>Loaded in the hour before</h3>${wl(f.pre_buyers, w => `<td>${usd(w.usd)}</td><td class="${w.sold_into ? 'neg' : 'dim'}">${w.sold_into ? 'sold ' + usd(w.sold_into) + ' into it' : 'held'}</td>`)}</div>
+        <div><h3>Sold into the spike</h3>${wl(f.sold_into, w => `<td>${usd(w.usd)}</td><td class="dim">${w.bought_before ? 'bought ' + usd(w.bought_before) + ' before' : ''}</td>`)}</div>
+      </div>
+      <div class="controls" style="margin-top:8px">
+        <button onclick="mgTrack('${d.mint}','operators')">👁 Track operators</button>
+        <button onclick="mgTrack('${d.mint}','pre')">👁 Track all pre-spike buyers</button>
+        <button onclick="openToken('${d.mint}')">Token details</button>
+        <a href="https://gmgn.ai/sol/token/${d.mint}" target="_blank"><button>GMGN</button></a>
+        <a href="https://jup.ag/swap/SOL-${d.mint}" target="_blank"><button>Jupiter</button></a></div>
+      <div class="note">Uses the pool's most recent ~300 trades (GeckoTerminal), so on busy coins older wallets can be missing. Tracked wallets go in group "Spike insiders" with alerts from $1k.</div>`;
+    mgChart(d.candles || [], d.spikes);
+  } catch (e) { box.innerHTML = `<div class="err">Error: ${e.message}</div>`; }
+}
+async function mgTrack(mint, which) {
+  try { const d = await send('POST', '/api/solana/migrated/track', {mint, which}); alertBox(`Now tracking ${d.added.length} wallets` + (d.skipped ? ` (${d.skipped} already tracked)` : '')); } catch (e) { alertBox(e.message); }
+}
 
 function zoneForm(mint = '', price = null) {
   const v = id => (document.getElementById(id) || {}).value || '';
