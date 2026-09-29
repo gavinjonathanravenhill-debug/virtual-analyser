@@ -71,6 +71,10 @@ SEED_BOTS = {
     "9PHm2cYU8DhwBrbRsqqAjhW9uXVrNR1RaLsvo9oGVeaq": (
         "HFT meme bot farm (Gate-funded)",
         "~200 tx/h via private program 4DKSAV…, fixed 0.423 SOL buys, funded 5,352 wallets; #1 VINE trader by PnL"),
+    "DH7hz5x4KpYqwoWtcyK8qm5VSqjvMCrNJoRVdKFDrZSL": (
+        "Volume / wash bot (Meteora PARASITE copy)",
+        "~164 tx/h, alternating buy/sell of one token every 20-60s on Meteora DAMM v2; funded by 5nFEw27b…, "
+        "has funded 5,425 wallets"),
 }
 BOT_TRADES = 20      # this many trades in one pool's recent window = bot-like, even if not on the list
 _bots_cache = [0, {}]
