@@ -285,9 +285,16 @@ function row(e, showWallet = true) {
     ${showWallet ? `<td class="l">${chip(e.group)} ${e.label}</td>` : ''}
     <td class="l ${e.kind}">${e.kind}</td><td class="l">${tok}</td><td>${amt(e.amount)}</td><td>${paid}${badge}</td>
     <td>${e.price_suspect ? '<span class="dim" title="Only a tiny or broken pool prices this token - value unknown">? no reliable price</span>' : usd(e.usd)}</td><td>${px(e.price)}</td><td>${usd(e.market_cap)}</td>
-    <td>${solscan('tx', e.sig, e.sig.slice(0, 8) + '…')}</td></tr>`;
+    <td>${copyBadge(e)}</td><td>${solscan('tx', e.sig, e.sig.slice(0, 8) + '…')}</td></tr>`;
 }
-const head = (w = true) => `<tr><th class="l">Time</th>${w ? '<th class="l">Wallet</th>' : ''}<th class="l">Type</th><th class="l">Token</th><th>Amount</th><th>Paid / got</th><th>USD</th><th>Price</th><th>Mcap</th><th>Tx</th></tr>`;
+function copyBadge(e) {
+  const c = e.copy;
+  if (!c) return '';
+  const col = c.call.startsWith('✅') ? 'var(--green)' : c.call.startsWith('⛔') ? 'var(--red)' : '#ffb84d';
+  return `<span class="exch" style="background:${col};color:#0b0f14;cursor:help" title="${c.reasons.join(' · ').replace(/"/g, '')}">${c.call}</span>
+    <div class="dim" style="font-size:10px;max-width:220px;white-space:normal">${c.reasons.slice(0, 2).join(' · ')}</div>`;
+}
+const head = (w = true) => `<tr><th class="l">Time</th>${w ? '<th class="l">Wallet</th>' : ''}<th class="l">Type</th><th class="l">Token</th><th>Amount</th><th>Paid / got</th><th>USD</th><th>Price</th><th>Mcap</th><th title="Should I copy this? Hover for why">Copy?</th><th>Tx</th></tr>`;
 
 async function loadWallets() {
   const d = await api(API + '/wallets');

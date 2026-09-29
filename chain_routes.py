@@ -72,9 +72,17 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
     def events():
         start()
         kinds = [k for k in (request.args.get("kinds") or "").split(",") if k]
-        return jsonify({"status": m.tracker.status, "events": m.tracker.query(
-            wallet=request.args.get("wallet") or None, group=request.args.get("group") or None,
-            kinds=kinds or None)})
+        evs = m.tracker.query(wallet=request.args.get("wallet") or None, group=request.args.get("group") or None,
+                              kinds=kinds or None)
+        try:   # copy / skip hint on recent buys (cached prices + cached risk only - no extra API calls)
+            import time as _t
+            recent = [e for e in evs if e.get("kind") == "BUY" and _t.time() - (e.get("ts") or 0) < 6 * 3600][:60]
+            cached = {mint: (m._tok.get(mint) or (0, {}))[1] for mint in {e["mint"] for e in recent}}
+            for e in recent:
+                e["copy"] = edge.copy_hint(m, e, cached.get(e["mint"]) or {})
+        except Exception as ex:
+            print(f"copy hints failed: {ex}")
+        return jsonify({"status": m.tracker.status, "events": evs})
 
     @bp.route(f"{api}/lookup")
     def lookup_route():

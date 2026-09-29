@@ -355,6 +355,44 @@ def chase_verdict(e, t):
             "detail": " · ".join(detail), "skip": v.startswith("⛔")}
 
 
+def copy_hint(m, e, t):
+    """One-glance answer for a tracked BUY: CONSIDER / WATCH / SKIP, and why. Uses cached data only (cheap)."""
+    if e.get("kind") != "BUY" or not e.get("mint") or e["mint"] in m.QUOTES:
+        return None
+    v = chase_verdict(e, t)
+    wv = verdicts(m).get(e["wallet"], "LEARNING")
+    cached = sig._risk.get((m.CHAIN, e["mint"]))
+    rv = cached[1]["verdict"] if cached else None
+    skip, why = [], []
+    if is_bot(e["wallet"]):
+        skip.append("known bot")
+    if v["skip"]:
+        skip.append(v["line"].replace("⛔ SKIP - ", ""))
+    if rv and rv.startswith("HIGH"):
+        skip.append("high-risk token")
+    if wv == "MUTE":
+        skip.append("this wallet loses money when copied")
+    if e.get("ts") and time.time() - e["ts"] > 3600:
+        why.append("over an hour old")
+    if v["move_pct"] is not None and not v["skip"]:
+        why.append(f"{v['move_pct']:+.0f}% since their buy")
+    if v["slip_pct"] is not None:
+        why.append(f"~{v['slip_pct']:.1f}% slippage for ${settings()['copy_size_usd']:,.0f}")
+    why.append({"COPY": "proven wallet 🏅", "MIXED": "wallet: mixed record", "LEARNING": "wallet: not enough history yet"}.get(wv, ""))
+    if rv:
+        why.append("risk " + rv.lower())
+    else:
+        why.append("risk not checked yet - open the token")
+    if skip:
+        call = "⛔ SKIP"
+    elif wv == "COPY" and v["move_pct"] is not None and v["move_pct"] < 15 and not (e.get("ts") and time.time() - e["ts"] > 3600):
+        call = "✅ CONSIDER"
+    else:
+        call = "👀 WATCH"
+    return {"call": call, "reasons": skip + [w for w in why if w], "move_pct": v["move_pct"], "slip_pct": v["slip_pct"],
+            "wallet": wv, "risk": rv}
+
+
 # ----------------------------------------------------------- risk gate ----
 def risk(m, mint):
     try:
