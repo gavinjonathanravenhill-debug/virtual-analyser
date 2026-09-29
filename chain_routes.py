@@ -123,6 +123,15 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
             return out
         return safe(build)
 
+    @bp.route(f"{api}/bots", methods=["GET", "POST", "DELETE"])
+    def bots_route():
+        if request.method == "POST":
+            d = request.get_json(force=True) or {}
+            return safe(lambda: edge.add_bot(d.get("address"), d.get("label"), d.get("note")))
+        if request.method == "DELETE":
+            return safe(lambda: {"removed": edge.remove_bot(request.args.get("address"))})
+        return safe(lambda: {"bots": sorted(edge.bots().values(), key=lambda b: -(b.get("added") or 0))})
+
     @bp.route(f"{api}/settings", methods=["POST"])
     def settings_route():
         return safe(lambda: edge.save_settings(request.get_json(force=True) or {}))

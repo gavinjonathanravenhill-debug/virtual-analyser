@@ -164,15 +164,31 @@ def run(job):
             w.writerows(rows)
         traders = {}
         for r in rows:
-            t = traders.setdefault(r["trader"], {"buys": 0.0, "sells": 0.0, "n": 0})
+            t = traders.setdefault(r["trader"], {"buys": 0.0, "sells": 0.0, "n": 0, "bought_tok": 0.0, "sold_tok": 0.0,
+                                                 "first": r["unix"], "last": r["unix"]})
             t["n"] += 1
             t["buys" if r["type"] == "Buy" else "sells"] += r["usd"] or 0
+            t["bought_tok" if r["type"] == "Buy" else "sold_tok"] += r["token_amount"]
+            t["last"] = r["unix"]
+        j["traders"] = traders
         j.update(stage="done", path=path, file=os.path.basename(path), rows=len(rows), done=time.time(),
                  capped=len(sigs) >= MAX_ROWS,
-                 top_traders=sorted(({"wallet": w, **v, "net": v["sells"] - v["buys"]} for w, v in traders.items()),
+                 top_traders=sorted(({"wallet": w, **v, "net": v["sells"] - v["buys"], "bot": _bot(w, v["n"])}
+                                     for w, v in traders.items()),
                                     key=lambda x: -(x["buys"] + x["sells"]))[:25])
     except Exception as e:
         j.update(stage="error", error=str(e)[:300])
+
+
+def _bot(w, n):
+    try:
+        import edge
+        b = edge.bots().get(w)
+        if b:
+            return b.get("label") or "known bot"
+    except Exception:
+        pass
+    return f"bot-like ({n} trades)" if n >= 200 else None
 
 
 def start(mint, start_ts, end_ts, pool=None):

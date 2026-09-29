@@ -115,7 +115,7 @@ def export_status(job):
     j = trade_export.JOBS.get(job)
     if not j:
         return jsonify({"error": "Unknown export (the server may have restarted)"}), 404
-    return jsonify({k: v for k, v in j.items() if k != "path"})
+    return jsonify({k: v for k, v in j.items() if k not in ("path", "traders")})
 
 
 @solana_bp.route("/api/solana/export/<job>/csv")
@@ -131,3 +131,43 @@ def export_cancel(job):
     if job in trade_export.JOBS:
         trade_export.JOBS[job]["cancel"] = True
     return jsonify({"ok": True})
+
+
+# ---- insider-group scanner: everyone who sold more than they bought, where their tokens came from, clusters ----
+import insider_scan  # noqa: E402
+
+
+@solana_bp.route("/api/solana/insiders", methods=["POST"])
+def insiders_start():
+    d = request.get_json(force=True) or {}
+    mint = (d.get("mint") or "").strip()
+    if not 32 <= len(mint) <= 44:
+        return jsonify({"error": "Paste the token address"}), 400
+    try:
+        a, b = _day(d.get("from")), _day(d.get("to"), end=True)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Pick a from and to date"}), 400
+    return jsonify(insider_scan.start(mint, min(a, b), max(a, b), (d.get("pool") or "").strip() or None))
+
+
+@solana_bp.route("/api/solana/insiders/<job>")
+def insiders_status(job):
+    j = insider_scan.JOBS.get(job)
+    if not j:
+        return jsonify({"error": "Unknown scan (the server may have restarted)"}), 404
+    if j.get("export_id") in trade_export.JOBS:
+        j["export"] = {k: trade_export.JOBS[j["export_id"]].get(k) for k in ("stage", "scanned", "found", "parsed", "rows", "reached")}
+    return jsonify({k: v for k, v in j.items() if k != "traders"} | {"traders": j.get("traders") if isinstance(j.get("traders"), int) else None})
+
+
+@solana_bp.route("/api/solana/insiders/<job>/cancel", methods=["POST"])
+def insiders_cancel(job):
+    if job in insider_scan.JOBS:
+        insider_scan.JOBS[job]["cancel"] = True
+    return jsonify({"ok": True})
+
+
+@solana_bp.route("/api/solana/insiders/<job>/track", methods=["POST"])
+def insiders_track(job):
+    d = request.get_json(force=True) or {}
+    return _j(lambda: insider_scan.track(job, d.get("wallets") or []))

@@ -315,21 +315,33 @@ def forensics(sp, trs):
         if t["kind"] == "sell" and sp["start"] <= t["t"] <= sp["end"] + 900:
             into[w] += t["usd"]
     total = sum(v["buy"] + v["sell"] for v in per.values()) or 1
+    botset = {w for w in per if edge.is_bot(w) or per[w]["n"] >= edge.BOT_TRADES}
+    bot_usd = sum(per[w]["buy"] + per[w]["sell"] for w in botset)
     both = [w for w, v in per.items() if v["buy"] and v["sell"]]
     wash_usd = sum(2 * min(per[w]["buy"], per[w]["sell"]) for w in both)
     top = sorted(per.items(), key=lambda kv: -(kv[1]["buy"] + kv[1]["sell"]))[:5]
-    insiders = [w for w in pre if w in into]            # loaded before, sold into the spike: the operators
+    insiders = [w for w in pre if w in into and w not in botset]   # loaded before, sold into the spike: the operators
     return {
-        "pre_buyers": sorted(({"wallet": w, "usd": v, "sold_into": into.get(w, 0)} for w, v in pre.items()),
-                             key=lambda x: -x["usd"])[:15],
-        "sold_into": sorted(({"wallet": w, "usd": v, "bought_before": pre.get(w, 0)} for w, v in into.items()),
-                            key=lambda x: -x["usd"])[:15],
+        "pre_buyers": sorted(({"wallet": w, "usd": v, "sold_into": into.get(w, 0), "bot": _botlabel(w, per)}
+                              for w, v in pre.items()), key=lambda x: -x["usd"])[:15],
+        "sold_into": sorted(({"wallet": w, "usd": v, "bought_before": pre.get(w, 0), "bot": _botlabel(w, per)}
+                             for w, v in into.items()), key=lambda x: -x["usd"])[:15],
+        "bot_pct": bot_usd / total * 100,
+        "bots": sorted(({"wallet": w, "usd": per[w]["buy"] + per[w]["sell"], "trades": per[w]["n"],
+                         "bot": _botlabel(w, per)} for w in botset), key=lambda x: -x["usd"])[:10],
         "operators": insiders,
         "wash_pct": wash_usd / total * 100,
         "top_wallet_pct": ((top[0][1]["buy"] + top[0][1]["sell"]) / total * 100) if top else 0,
         "top_wallets": [{"wallet": w, "usd": v["buy"] + v["sell"], "trades": v["n"]} for w, v in top],
         "trades_seen": len(trs), "window": [trs[0]["t"], trs[-1]["t"]] if trs else None,
     }
+
+
+def _botlabel(w, per):
+    b = edge.bots().get(w)
+    if b:
+        return b.get("label") or "known bot"
+    return f"bot-like ({per[w]['n']} trades)" if per.get(w, {}).get("n", 0) >= edge.BOT_TRADES else None
 
 
 def manipulation_score(an, a):
@@ -340,6 +352,8 @@ def manipulation_score(an, a):
         if an.get("pattern") == "pump & dump":
             pts["pump & dump"] = 25
     f = an.get("forensics") or {}
+    if f.get("bot_pct", 0) > 40:
+        pts["bot volume"] = min(20, int(f["bot_pct"] / 4))
     if f.get("wash_pct", 0) > 20:
         pts["wash trading"] = min(20, int(f["wash_pct"] / 2))
     if f.get("top_wallet_pct", 0) > 15:
@@ -473,7 +487,7 @@ def _alerts(results, spiked, s):
                   f"{an['spike']['vol_x']:.0f}x volume · +{an.get('run_pct') or 0:.0f}% · pattern: <b>{an.get('pattern')}</b>"
                   f"{' (gave back ' + format(an.get('giveback_pct') or 0, '.0f') + '%)' if an.get('giveback_pct') is not None else ''}\n"
                   f"{len(f['pre_buyers'])} wallets loaded in the hour before · {len(f['operators'])} bought-before AND sold-into it"
-                  f" · wash ~{f['wash_pct']:.0f}% · top wallet {f['top_wallet_pct']:.0f}% of volume\n"
+                  f" · wash ~{f['wash_pct']:.0f}% · bots {f.get('bot_pct', 0):.0f}% · top wallet {f['top_wallet_pct']:.0f}% of volume\n"
                   f"{', '.join(k for k in an['manipulation_parts'])}\n"
                   f"{edge.links_html(sc, mint, an['pool'])}", group="Migrated")
 
@@ -485,7 +499,8 @@ def track_wallets(mint, which="operators", group="Spike insiders"):
         r = c.execute("SELECT symbol, spike FROM migrated WHERE mint=?", (mint,)).fetchone()
     an = json.loads(r["spike"]) if r and r["spike"] else analyse(mint)
     f = an.get("forensics") or {}
-    ws = f.get("operators") if which == "operators" else [x["wallet"] for x in f.get("pre_buyers") or []]
+    ws = f.get("operators") if which == "operators" else [x["wallet"] for x in f.get("pre_buyers") or [] if not x.get("bot")]
+    ws = [w for w in ws or [] if not edge.is_bot(w)]
     sym = (r["symbol"] if r else None) or mint[:6]
     added = []
     for w in (ws or [])[:15]:

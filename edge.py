@@ -55,6 +55,57 @@ def init_tables(c):
     c.execute("CREATE INDEX IF NOT EXISTS copytrades_ts ON copytrades (chain, ts)")
     c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS digest (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, text TEXT)")
+    c.execute("""CREATE TABLE IF NOT EXISTS bots (address TEXT PRIMARY KEY, label TEXT, note TEXT, source TEXT,
+                 added INTEGER)""")
+    for a, (label, note) in SEED_BOTS.items():
+        c.execute("INSERT OR IGNORE INTO bots VALUES (?,?,?,?,?)", (a, label, note, "seed", int(time.time())))
+
+
+# ------------------------------------------------------------ known bots --
+SEED_BOTS = {
+    "9PHm2cYU8DhwBrbRsqqAjhW9uXVrNR1RaLsvo9oGVeaq": (
+        "HFT meme bot farm (Gate-funded)",
+        "~200 tx/h via private program 4DKSAV…, fixed 0.423 SOL buys, funded 5,352 wallets; #1 VINE trader by PnL"),
+}
+BOT_TRADES = 20      # this many trades in one pool's recent window = bot-like, even if not on the list
+_bots_cache = [0, {}]
+
+
+def _norm(a):
+    a = (a or "").strip()
+    return a.lower() if a.startswith("0x") else a
+
+
+def bots():
+    if time.time() - _bots_cache[0] < 30:
+        return _bots_cache[1]
+    try:
+        with sig._db_lock, sig.db() as c:
+            _bots_cache[:] = [time.time(), {r["address"]: dict(r) for r in c.execute("SELECT * FROM bots")}]
+    except Exception:
+        _bots_cache[:] = [time.time(), {a: {"address": a, "label": l, "note": n} for a, (l, n) in SEED_BOTS.items()}]
+    return _bots_cache[1]
+
+
+def is_bot(addr):
+    return _norm(addr) in bots()
+
+
+def add_bot(addr, label="", note="", source="manual"):
+    a = _norm(addr)
+    if not a:
+        raise ValueError("address needed")
+    with sig._db_lock, sig.db() as c:
+        c.execute("INSERT OR REPLACE INTO bots VALUES (?,?,?,?,?)", (a, label or a[:6] + "…", note, source, int(time.time())))
+    _bots_cache[0] = 0
+    return bots()[a]
+
+
+def remove_bot(addr):
+    with sig._db_lock, sig.db() as c:
+        n = c.execute("DELETE FROM bots WHERE address=?", (_norm(addr),)).rowcount
+    _bots_cache[0] = 0
+    return n
 
 
 # ------------------------------------------------------------ settings ----
@@ -204,8 +255,9 @@ def backtest(m, size=None, days=60):
             sells[(r["wallet"], r["mint"])].append(r)
     trades = []
     now = time.time()
+    bl = bots()
     for r in rows:
-        if r["kind"] != "BUY" or not r["fresh"] or not r["our_price"]:
+        if r["kind"] != "BUY" or not r["fresh"] or not r["our_price"] or _norm(r["wallet"]) in bl:
             continue
         entry, cost = r["our_price"], s["fee_pct"] / 100 + 2 * _slip(size, r["liq"])
         ex = next((x for x in sells[(r["wallet"], r["mint"])] if x["ts"] > r["ts"]), None)
@@ -433,8 +485,9 @@ def confluence(m, hours=24, limit=25):
             (m.CHAIN, since))]
     by = defaultdict(lambda: {"buyers": {}, "sellers": set(), "buy_usd": 0.0, "first": None, "first_price": None,
                               "symbol": None})
+    bl = bots()
     for r in rows:
-        if r["mint"] in m.QUOTES:
+        if r["mint"] in m.QUOTES or _norm(r["wallet"]) in bl:
             continue
         d = by[r["mint"]]
         d["symbol"] = d["symbol"] or r["symbol"]

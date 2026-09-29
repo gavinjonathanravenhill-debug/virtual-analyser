@@ -183,6 +183,9 @@ def is_signal(e, m):
         floor = edge.group_min(e.get("group"))
     if not e.get("alert"):
         return False
+    import edge
+    if edge.is_bot(e.get("wallet")):
+        return False
     if e.get("to_exchange") or e.get("from_exchange"):
         return usd >= (floor or 1000)  # exchange deposit = likely sell; withdrawal = restocking / accumulation
     return usd >= (floor or MIN_USD)

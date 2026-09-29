@@ -153,6 +153,7 @@
       <div class="card" id="ed-set"><h3>⚙️ Alert settings</h3><div class="dim">Loading…</div></div>
       <div class="card" id="ed-rt"><h3>⚡ Real-time alerts</h3><div class="dim">Loading…</div></div>
     </div>
+    <div class="card" id="ed-bots"><h3>🤖 Known bots</h3><div class="dim">Loading…</div></div>
   </section>
 
   <section class="tab" id="t-migrated">
@@ -207,8 +208,10 @@
         <input id="ex-mint" placeholder="Token address" style="flex:1;min-width:300px">
         <input id="ex-from" type="date"> → <input id="ex-to" type="date">
         <input id="ex-pool" placeholder="Pool (optional - defaults to the biggest)" style="min-width:240px">
-        <button onclick="exStart()">⬇️ Build CSV</button></div>
-      <div id="ex-out" style="margin-top:8px"></div></div>
+        <button onclick="exStart()">⬇️ Build CSV</button>
+        <button onclick="inStart()" title="Everyone who sold more than they bought here: where their tokens came from, who funded them, and which of them are the same people">🕵️ Find insider groups</button></div>
+      <div id="ex-out" style="margin-top:8px"></div>
+      <div id="in-out" style="margin-top:8px"></div></div>
     <div class="controls" style="margin:0 0 12px">
       <input id="tk-addr" placeholder="Paste any token address to screen it" style="flex:1;min-width:320px">
       <button onclick="openToken($('#tk-addr').value.trim())">Screen token</button>
@@ -263,7 +266,7 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.id === 't-' + b.dataset.t));
   if (b.dataset.t === 'signals') loadSignals();
   if (b.dataset.t === 'flows') loadFlows();
-  if (b.dataset.t === 'edge') loadEdge();
+  if (b.dataset.t === 'edge') { loadEdge(); loadBots(); }
   if (b.dataset.t === 'migrated') loadMigrated();
 });
 ['#f-group', '#f-wallet', '#f-swaps', '#f-min'].forEach(s => $(s).onchange = loadFeed);
@@ -441,6 +444,21 @@ async function loadEdge() {
          <div class="controls" style="margin-top:8px"><button onclick="setupHook()">${w.webhook_id ? '🔄 Re-sync webhook' : '⚡ Turn on real-time'}</button></div>`);
   } catch (e) { $('#ed-hot').innerHTML = `<div class="err">Error: ${e.message}</div>`; }
 }
+async function loadBots() {
+  try {
+    const d = await api(API + '/bots');
+    $('#ed-bots').innerHTML = `<h3>🤖 Known bots (${d.bots.length})</h3><div class="dim" style="margin-bottom:6px">Never alerted on, left out of "smart buyers", the copy test and cluster tracking, and their volume is flagged as bot volume in the Migrated forensics. Wallets with 20+ trades in a coin's recent window are also treated as bot-like automatically.</div>` +
+      '<table>' + d.bots.map(b => `<tr><td class="l"><a href="${CFG.addr}${b.address}" target="_blank">${short(b.address)}</a></td><td class="l">${b.label || ''}</td>
+        <td class="l dim" style="font-size:11px">${b.note || ''}</td><td class="dim">${b.source || ''}</td><td><button onclick="delBot('${b.address}')">✕</button></td></tr>`).join('') + '</table>' +
+      `<div class="controls" style="margin-top:8px;flex-wrap:wrap;gap:6px"><input id="bt-addr" placeholder="Bot wallet address" style="flex:1;min-width:260px"><input id="bt-label" placeholder="Label">
+        <input id="bt-note" placeholder="Note" style="min-width:200px"><button onclick="addBot()">➕ Add bot</button></div>`;
+  } catch (e) { $('#ed-bots').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+async function addBot(addr, label) {
+  try { await send('POST', API + '/bots', {address: addr || $('#bt-addr').value.trim(), label: label || $('#bt-label').value.trim(), note: addr ? 'added from a scan' : $('#bt-note').value.trim()});
+    alertBox('Marked as bot'); if ($('#ed-bots')) loadBots(); } catch (e) { alertBox(e.message); }
+}
+async function delBot(a) { try { await send('DELETE', API + '/bots?address=' + encodeURIComponent(a)); loadBots(); } catch (e) { alertBox(e.message); } }
 async function saveSettings() {
   const v = id => $('#' + id).value;
   try {
@@ -478,12 +496,55 @@ async function exPoll(id) {
       clearInterval(exTimer);
       h += ` - <b>${j.rows.toLocaleString()} trades</b>${j.capped ? ' (hit the row cap - shorten the range)' : ''} <a href="/api/solana/export/${id}/csv"><button>⬇️ Download CSV</button></a>` +
         (j.top_traders && j.top_traders.length ? '<h3 style="margin-top:10px">Biggest traders in this range</h3><table><tr><th class="l">Wallet</th><th>Trades</th><th>Bought</th><th>Sold</th><th>Net (sold - bought)</th><th></th></tr>' +
-          j.top_traders.map(t => `<tr><td class="l"><a href="${CFG.addr}${t.wallet}" target="_blank">${short(t.wallet)}</a></td><td>${t.n}</td><td>${usd(t.buys)}</td><td>${usd(t.sells)}</td>
+          j.top_traders.map(t => `<tr><td class="l"><a href="${CFG.addr}${t.wallet}" target="_blank">${short(t.wallet)}</a>${t.bot ? ` <span class="dim">🤖 ${t.bot}</span>` : ''}</td><td>${t.n}</td><td>${usd(t.buys)}</td><td>${usd(t.sells)}</td>
             <td class="${t.net >= 0 ? 'pos' : 'neg'}">${usd(t.net)}</td><td><button onclick="$('#lk-addr').value='${t.wallet}';runLookup()">Look up</button></td></tr>`).join('') + '</table>' : '');
     }
     if (j.stage === 'error') clearInterval(exTimer);
     $('#ex-out').innerHTML = h;
   } catch (e) { clearInterval(exTimer); $('#ex-out').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+
+// ---------- insider groups ("sold without buying") ----------
+let inTimer = null, inJob = null;
+async function inStart(mint) {
+  if (mint) { $('#ex-mint').value = mint; document.querySelector('nav button[data-t="lookup"]').click(); $('#modal').classList.remove('on'); }
+  if (!$('#ex-from').value) { const d = new Date(); $('#ex-to').value = d.toISOString().slice(0, 10); d.setDate(d.getDate() - 1); $('#ex-from').value = d.toISOString().slice(0, 10); }
+  if (!$('#ex-mint').value.trim()) return;
+  try {
+    const j = await send('POST', '/api/solana/insiders', {mint: $('#ex-mint').value.trim(), from: $('#ex-from').value, to: $('#ex-to').value, pool: $('#ex-pool').value.trim()});
+    inJob = j.id; clearInterval(inTimer); inTimer = setInterval(() => inPoll(j.id), 3000); inPoll(j.id);
+  } catch (e) { $('#in-out').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+const aw = w => `<a href="${CFG.addr}${w}" target="_blank">${short(w)}</a>`;
+async function inPoll(id) {
+  try {
+    const j = await api('/api/solana/insiders/' + id);
+    const ex = j.export || {};
+    let h = `<h3>🕵️ Insider groups ${j.symbol || ''}</h3>`;
+    if (j.stage === 'rebuilding the pool\'s trades') h += `<div class="dim">Rebuilding trades: ${ex.stage || ''} - ${(ex.scanned || 0).toLocaleString()} txs scanned, ${(ex.rows || 0).toLocaleString()} trades <button onclick="send('POST','/api/solana/insiders/${id}/cancel')">Cancel</button></div>`;
+    else if (j.stage.startsWith('tracing')) h += `<div class="dim">${j.group2} wallets sold more than they bought (of ${j.traders} traders) - tracing the biggest: ${j.traced}/${j.to_trace}</div>`;
+    else if (j.stage === 'error') h += `<div class="err">${j.error}</div>`;
+    else if (j.stage === 'done') {
+      clearInterval(inTimer);
+      h += `<div class="dim" style="margin-bottom:8px"><b>${j.wallets.length}</b> wallets sold more than they bought (<b>${j.no_buy}</b> never bought here at all) - that's <b>${j.group2_share.toFixed(0)}%</b> of all selling in this range.
+        <b>${j.groups.length}</b> clusters found, covering <b>${j.clustered_share.toFixed(0)}%</b> of selling.</div>`;
+      h += j.groups.length ? j.groups.map((g, i) => `<div class="card" style="margin:6px 0"><b>Cluster ${i + 1}</b> - ${g.wallets.length} wallets sold <b class="neg">${usd(g.sold_usd)}</b> (bought ${usd(g.bought_usd)})
+          <div class="dim" style="margin:4px 0">${g.evidence.map(e => e.text).join(' · ')}</div>
+          <div style="font-size:12px">${g.wallets.map(aw).join(' ')}</div>
+          <div class="controls" style="margin-top:6px"><button onclick='inTrack(${JSON.stringify(g.wallets)})'>👁 Track this cluster</button></div></div>`).join('')
+        : '<div class="dim">No clusters - the group-2 wallets don\'t share senders, funders or bag sizes in what we could trace.</div>';
+      h += '<h3 style="margin-top:10px">Everyone who sold more than they bought</h3><table><tr><th class="l">Wallet</th><th>Sold</th><th>Bought</th><th>Tokens from outside</th><th class="l">Where from</th><th class="l">Sent by</th><th class="l">Funded by</th><th>Age</th></tr>' +
+        j.wallets.map(w => `<tr><td class="l">${aw(w.wallet)}${w.no_buy ? ' <span class="neg" title="Never bought in this pool">no buy</span>' : ''}</td><td>${usd(w.sold_usd)}</td><td>${usd(w.bought_usd)}</td>
+          <td>${(w.outside_tok / 1e6).toFixed(2)}M</td><td class="l">${w.source || ''}</td><td class="l">${w.sender ? aw(w.sender) : '–'}</td>
+          <td class="l">${w.funder ? (w.funder_exchange ? '🏦 ' + w.funder_exchange : aw(w.funder)) : '–'}</td><td>${w.born ? ago(w.born).replace(' ago', '') : '–'}</td></tr>`).join('') + '</table>' +
+        `<div class="controls" style="margin-top:6px"><button onclick='inTrack(${JSON.stringify(j.wallets.filter(w => w.no_buy).map(w => w.wallet))})'>👁 Track all "no buy" sellers</button></div>
+         <div class="note">"Tokens from outside" = sold minus bought in this pool. Sources come from each wallet's last 300 transactions; funders only show when that reaches the wallet's first transaction. Exchanges and known bots are never used to link wallets.</div>`;
+    }
+    $('#in-out').innerHTML = h;
+  } catch (e) { clearInterval(inTimer); $('#in-out').innerHTML = `<div class="err">${e.message}</div>`; }
+}
+async function inTrack(wallets) {
+  try { const d = await send('POST', `/api/solana/insiders/${inJob}/track`, {wallets}); alertBox(`Now tracking ${d.added.length} wallets (group "Insider clusters")`); } catch (e) { alertBox(e.message); }
 }
 
 // ---------- migrated coins ----------
@@ -543,13 +604,14 @@ async function mgAnalyse(mint) {
   try {
     const d = await api('/api/solana/migrated/analyse?mint=' + encodeURIComponent(mint));
     const f = d.forensics || {}, sp = d.spike, i = d.info || {};
-    const wl = (arr, cols) => arr && arr.length ? '<table>' + arr.map(w => `<tr><td class="l"><a href="${CFG.addr}${w.wallet}" target="_blank">${short(w.wallet)}</a></td>${cols(w)}</tr>`).join('') + '</table>' : '<div class="dim">none in the trades we can see</div>';
+    const wl = (arr, cols) => arr && arr.length ? '<table>' + arr.map(w => `<tr><td class="l"><a href="${CFG.addr}${w.wallet}" target="_blank">${short(w.wallet)}</a>${w.bot ? ` <span class="dim">🤖 ${w.bot}</span>` : ''}</td>${cols(w)}${w.bot && !w.bot.startsWith('bot-like') ? '<td></td>' : `<td><button title="Mark as bot" onclick="addBot('${w.wallet}','${w.bot ? 'bot-like' : 'manual'}')">🤖</button></td>`}</tr>`).join('') + '</table>' : '<div class="dim">none in the trades we can see</div>';
     box.innerHTML = `<h3>🔬 ${i.symbol || short(d.mint)} forensics <span class="dim" style="font-size:12px">${short(d.mint)} · manipulation score <b class="${d.manipulation >= 60 ? 'neg' : d.manipulation >= 30 ? '' : 'pos'}">${d.manipulation}/100</b></span></h3>
       <canvas id="mg-canvas" style="width:100%;height:180px"></canvas>
       <div class="tiles">
         <div class="tile"><div class="k">Pattern</div><div class="v">${d.pattern || 'no spike'}</div><div class="dim">${sp ? `+${(d.run_pct || 0).toFixed(0)}% on ${sp.vol_x.toFixed(0)}x volume` + (d.giveback_pct != null ? ` · gave back ${d.giveback_pct.toFixed(0)}%` : '') : 'last 4h of 1-min candles'}</div></div>
         <div class="tile"><div class="k">Wash trading</div><div class="v">${pc0(f.wash_pct)}</div><div class="dim">volume from wallets both buying and selling</div></div>
         <div class="tile"><div class="k">Top wallet</div><div class="v">${pc0(f.top_wallet_pct)}</div><div class="dim">of volume · ${f.trades_seen || 0} trades seen</div></div>
+        <div class="tile"><div class="k">Bot volume</div><div class="v">${pc0(f.bot_pct)}</div><div class="dim">${(f.bots || []).length} bot wallets</div></div>
         <div class="tile"><div class="k">Operators</div><div class="v">${(f.operators || []).length}</div><div class="dim">bought before AND sold into the spike</div></div>
       </div>
       <div class="dim" style="margin:6px 0">${Object.entries(d.manipulation_parts || {}).map(([k, v]) => k + ' +' + v).join(' · ') || 'no manipulation signs'}${d.audit ? ` · audit: bundlers ${pc0(d.audit.bundlers)}, snipers ${pc0(d.audit.snipers)}, insiders ${pc0(d.audit.insiders)}, dev ${pc0(d.audit.dev)}` : ''}</div>
@@ -707,7 +769,7 @@ async function openToken(mint) {
     + btn(`https://dexscreener.com/${CFG.dexscreener}/${mint}`, '📈 DexScreener')
     + btn(`${CFG.token}${mint}${CFG.holders_suffix}`, `Holders (${CFG.explorer_name})`)
     + `<button onclick="zoneFromToken('${mint}')">🎯 Add price zone</button>`
-    + (CFG.chain === 'solana' ? `<button onclick="exStart('${mint}')">⬇️ Trades CSV</button>` : '');
+    + (CFG.chain === 'solana' ? `<button onclick="exStart('${mint}')">⬇️ Trades CSV</button><button onclick="inStart('${mint}')">🕵️ Insider groups</button>` : '');
   $('#tk-body').innerHTML = '<div class="loading">Screening…</div>';
   try {
     const d = await api(API + '/token/' + mint);
