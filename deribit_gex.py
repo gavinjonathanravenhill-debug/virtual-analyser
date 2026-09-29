@@ -89,6 +89,15 @@ def fetch_book_summary(currency="BTC"):
     return rows
 
 
+def get_index_price(currency="BTC"):
+    try:
+        r = requests.get(f"{DERIBIT_BASE}/get_index_price", params={"index_name": f"{currency.lower()}_usd"},
+                         timeout=REQUEST_TIMEOUT)
+        return float(r.json()["result"]["index_price"])
+    except Exception:
+        return 0.0
+
+
 def build_gex_by_strike(currency="BTC", strike_window=0.12, min_oi=0.0):
     """Aggregate GEX per strike across all expiries.
 
@@ -97,12 +106,15 @@ def build_gex_by_strike(currency="BTC", strike_window=0.12, min_oi=0.0):
     """
     rows = fetch_book_summary(currency)
 
+    # Spot = the BTC index. Each option's underlying_price is the FUTURE for its own
+    # expiry (far expiries trade thousands above spot), so the first row's value can be
+    # way off - that's what pushed the spot line away from the live BTC price.
     spot = 0.0
-    for row in rows:
-        up = row.get("underlying_price")
-        if up:
-            spot = float(up)
-            break
+    idx = [float(r["estimated_delivery_price"]) for r in rows if r.get("estimated_delivery_price")]
+    if idx:
+        spot = sorted(idx)[len(idx) // 2]
+    if not spot:
+        spot = get_index_price(currency)
     if not spot:
         raise DeribitError("Could not determine spot price")
 
@@ -129,7 +141,8 @@ def build_gex_by_strike(currency="BTC", strike_window=0.12, min_oi=0.0):
         if not T or iv <= 0:
             continue
 
-        gamma = bs_gamma(spot, strike, T, iv)
+        fwd = float(row.get("underlying_price") or spot)   # price each expiry off its own forward
+        gamma = bs_gamma(fwd, strike, T, iv)
         # Dollar gamma per 1% move. Calls add, puts subtract, which is
         # the standard dealer-positioning convention.
         gex = gamma * oi * spot * spot * 0.01
