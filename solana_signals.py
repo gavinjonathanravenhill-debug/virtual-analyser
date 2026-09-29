@@ -529,8 +529,9 @@ _risk = {}
 def geckoterminal_info(network, token):
     """Free, keyless: holders count/top-10 %, mint & freeze authority, GT score (beta coverage)."""
     try:
-        r = requests.get(f"https://api.geckoterminal.com/api/v2/networks/{network}/tokens/{token}/info",
-                         headers={"accept": "application/json"}, timeout=15)
+        import gt_limit
+        r = gt_limit.get(f"https://api.geckoterminal.com/api/v2/networks/{network}/tokens/{token}/info", timeout=15,
+                         interactive=True)   # alerts are time-sensitive: ahead of the background scanner
         if r.ok:
             return (r.json().get("data") or {}).get("attributes") or {}
     except Exception:

@@ -72,7 +72,7 @@ def migrated_analyse():
     mint = (request.args.get("mint") or "").strip()
     if not 32 <= len(mint) <= 44:
         return jsonify({"error": "Paste a Solana token address"}), 400
-    return _j(lambda: migrated.analyse(mint))
+    return _j(lambda: migrated.analyse(mint, interactive=True))
 
 
 @solana_bp.route("/api/solana/migrated/track", methods=["POST"])

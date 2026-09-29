@@ -55,21 +55,15 @@ edge.DEFAULTS.update({
 })
 edge._set_cache[1] = None   # settings cached before these defaults existed must be rebuilt
 
-_gt_lock = threading.Lock()
-_gt_last = [0.0]
 _s = requests.Session()
 
 
 # ------------------------------------------------------------ fetchers ----
-def gt(path, **params):
-    with _gt_lock:
-        wait = GT_GAP - (time.time() - _gt_last[0])
-        if wait > 0:
-            time.sleep(wait)
-        _gt_last[0] = time.time()
-        r = _s.get(GT + path, params=params, timeout=20, headers={"accept": "application/json;version=20230302"})
+def gt(path, interactive=False, **params):
+    import gt_limit
+    r = gt_limit.get(GT + path, params=params, interactive=interactive)
     if r.status_code == 429:
-        raise RuntimeError("GeckoTerminal rate limit - slowing down")
+        raise RuntimeError("GeckoTerminal is rate limiting - try again in a minute")
     r.raise_for_status()
     return r.json()
 
@@ -267,14 +261,15 @@ def _audit_budget():
 
 
 # --------------------------------------------------------------- spikes ---
-def candles(pool, limit=360):
-    j = gt(f"/networks/solana/pools/{pool}/ohlcv/minute", aggregate=1, limit=limit, currency="usd", token="base")
+def candles(pool, limit=360, interactive=False):
+    j = gt(f"/networks/solana/pools/{pool}/ohlcv/minute", interactive=interactive, aggregate=1, limit=limit,
+           currency="usd", token="base")
     rows = ((j.get("data") or {}).get("attributes") or {}).get("ohlcv_list") or []
     return sorted([{"t": r[0], "o": r[1], "h": r[2], "l": r[3], "c": r[4], "v": r[5]} for r in rows], key=lambda x: x["t"])
 
 
-def trades(pool):
-    j = gt(f"/networks/solana/pools/{pool}/trades")
+def trades(pool, interactive=False):
+    j = gt(f"/networks/solana/pools/{pool}/trades", interactive=interactive)
     out = []
     for d in j.get("data") or []:
         a = d.get("attributes") or {}
@@ -388,11 +383,11 @@ def manipulation_score(an, a):
     return min(100, sum(pts.values())), pts
 
 
-def analyse(mint=None, pool=None):
+def analyse(mint=None, pool=None, interactive=False):
     """Full spike forensics for one coin (on demand or from the scanner)."""
     init_tables()
     if not pool:
-        j = gt(f"/networks/solana/tokens/{mint}/pools", page=1)
+        j = gt(f"/networks/solana/tokens/{mint}/pools", interactive=interactive, page=1)
         ps = parse_pools(j)
         if not ps:
             raise RuntimeError("No DEX pool found for that token")
@@ -401,9 +396,9 @@ def analyse(mint=None, pool=None):
         info = best
     else:
         info = {}
-    cs = candles(pool)
+    cs = candles(pool, interactive=interactive)
     spikes = find_spikes(cs)
-    trs = trades(pool)
+    trs = trades(pool, interactive=interactive)
     main = max(spikes, key=lambda s: (s["high"] / s["pre"] if s["pre"] else 0) * s["vol_x"]) if spikes else None
     out = {"mint": mint, "pool": pool, "info": info, "candles": cs[-240:], "spikes": spikes, "spike": main,
            "analysed_at": time.time()}
@@ -558,7 +553,8 @@ def summary():
                     "mint": r["mint"], "status": r["status"], "reasons": r.get("reasons") or [], "audit": r.get("audit"),
                     "pattern": sp.get("pattern"), "manipulation": sp.get("manipulation"), "spiked_at": r.get("spiked_at")})
     counts = {k: sum(1 for r in rows if r["status"] == k) for k in ("pass", "fail", "rugged")}
-    return {"rows": out, "st_key": bool(ST_KEY), "counts": counts, "audits_today": _audits_today["n"], "status": _status,
+    import gt_limit
+    return {"rows": out, "st_key": bool(ST_KEY), "counts": counts, "gt": gt_limit.status(), "audits_today": _audits_today["n"], "status": _status,
             "settings": {k: v for k, v in s.items() if k.startswith("mg_")}}
 
 

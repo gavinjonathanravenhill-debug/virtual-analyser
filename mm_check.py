@@ -20,7 +20,8 @@ def _f(v, default=0.0):
     except: return default
 
 def _search_pools(query):
-    r = requests.get(f"{GT_BASE}/search/pools", params={"query": query}, headers=HEADERS, timeout=TIMEOUT)
+    import gt_limit
+    r = gt_limit.get(f"{GT_BASE}/search/pools", params={"query": query}, headers=HEADERS, timeout=TIMEOUT, interactive=True)
     r.raise_for_status()
     return r.json().get("data", [])
 
@@ -42,7 +43,8 @@ def _matches_token(pool, token_address):
     return not rel
 
 def _get_trades(network, pool_address):
-    r = requests.get(f"{GT_BASE}/networks/{network}/pools/{pool_address}/trades", headers=HEADERS, timeout=TIMEOUT)
+    import gt_limit
+    r = gt_limit.get(f"{GT_BASE}/networks/{network}/pools/{pool_address}/trades", headers=HEADERS, timeout=TIMEOUT, interactive=True)
     r.raise_for_status()
     return r.json().get("data", [])
 

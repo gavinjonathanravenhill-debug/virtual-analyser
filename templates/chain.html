@@ -560,6 +560,7 @@ async function loadMigrated() {
       (d.counts ? ` · last 24h: <b class="pos">${d.counts.pass} pass</b>, ${d.counts.fail} filtered, 💀 ${d.counts.rugged} rugged` : '') +
       (st.last_result ? ` · last scan ${st.last_result.spikes} spikes analysed` : '') +
       ` · audits today ${d.audits_today}/${s.mg_audit_per_day}` + (d.st_key ? '' : ' · <b class="neg">no SOLANATRACKER_API_KEY - bundler/sniper audit off</b>') +
+      (d.gt && d.gt.paused_for ? ` · <span class="dim">GeckoTerminal busy, resuming in ${d.gt.paused_for}s</span>` : '') +
       (st.error ? ` · <span class="err">${st.error}</span>` : '');
     const show = $('#mg-show').value;
     const rows = d.rows.filter(r => show === 'all' || (show === 'rugged' ? r.status === 'rugged' : r.status === 'pass' || (show === 'spikes' && r.manipulation != null && r.status !== 'rugged')));

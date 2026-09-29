@@ -209,7 +209,8 @@ class CoinGecko:
 
 def dex_liquidity(contract):
     try:
-        r = requests.get(f"{GECKOTERMINAL}/networks/eth/tokens/{contract}", timeout=20)
+        import gt_limit
+        r = gt_limit.get(f"{GECKOTERMINAL}/networks/eth/tokens/{contract}", timeout=20)
         if r.ok:
             v = r.json()["data"]["attributes"].get("total_reserve_in_usd")
             return float(v) if v else None
