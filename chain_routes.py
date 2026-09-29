@@ -123,6 +123,7 @@ def make_chain_bp(m, start, profile_fn, addr_ok):
         start()
         def build():
             out = {"hot": edge.confluence(m), "backtest": edge.backtest(m, request.args.get("size")),
+                   "copy_list": edge.copy_list(m), "copy_now": edge.copy_now(m),
                    "settings": edge.settings(), "quiet_now": edge.quiet_now(), "groups": sorted(
                        {(w.get("group") or "") for w in m.WALLETS.values()})}
             if name == "solana":

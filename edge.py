@@ -15,6 +15,7 @@ Edge layer on top of the signals engine (all chains):
 """
 
 import json
+import statistics
 import threading
 import time
 from collections import defaultdict
@@ -41,6 +42,10 @@ DEFAULTS = {
     "digest_minutes": 60,
     "confluence_alert": 70,      # alert when a coin's score reaches this
     "my_tokens": [],             # coins you hold (addresses) - exits on these are always sent
+    "assumed_lag_pct": 3,        # when we have no independent price: assume you buy this % higher / sell lower
+    "min_hold_min": 20,          # wallets that usually exit faster than this can't be copied by hand
+    "max_trades_day": 30,        # more than this = bot-like
+    "min_edge_t": 1.5,           # COPY needs the average return to be this many standard errors above zero
 }
 
 
@@ -260,9 +265,15 @@ def backtest(m, size=None, days=60):
         if r["kind"] != "BUY" or not r["fresh"] or not r["our_price"] or _norm(r["wallet"]) in bl:
             continue
         entry, cost = r["our_price"], s["fee_pct"] / 100 + 2 * _slip(size, r["liq"])
+        lag = s["assumed_lag_pct"] / 100
+        assumed = not r["their_price"] or abs(entry / r["their_price"] - 1) < 1e-6   # no independent price seen
+        if assumed:
+            entry *= 1 + lag          # realistic: you get in after them...
         ex = next((x for x in sells[(r["wallet"], r["mint"])] if x["ts"] > r["ts"]), None)
         if ex:
             exit_p, closed, how, held = ex["our_price"], True, "followed their sell", ex["ts"] - r["ts"]
+            if not ex["their_price"] or abs(ex["our_price"] / ex["their_price"] - 1) < 1e-6:
+                exit_p *= 1 - lag     # ...and out after them
         elif r["p7d"]:
             exit_p, closed, how, held = r["p7d"], True, "7-day time stop", 7 * 86400
         else:
@@ -272,7 +283,7 @@ def backtest(m, size=None, days=60):
         chase = (entry / r["their_price"] - 1) if r["their_price"] else None
         trades.append({**{k: r[k] for k in ("wallet", "label", "grp", "mint", "symbol", "ts", "liq", "mcap")},
                        "entry": entry, "exit": exit_p, "ret": ret, "closed": closed, "how": how, "held": held,
-                       "cost": cost, "chase": chase,
+                       "cost": cost, "chase": chase, "assumed_lag": assumed,
                        "ret24": (r["p24h"] / entry - 1 - cost) if r["p24h"] else None})
     per = defaultdict(list)
     for t in trades:
@@ -294,15 +305,32 @@ def backtest(m, size=None, days=60):
                "hold24_avg": sum(r24) / len(r24) * 100 if r24 else None,
                "avg_chase": (sum(t["chase"] for t in ts if t["chase"] is not None) /
                              max(1, sum(t["chase"] is not None for t in ts)) * 100)}
+        span_d = max(1 / 24, (max(t["ts"] for t in ts) - min(t["ts"] for t in ts)) / 86400)
+        row["trades_day"] = len(ts) / span_d
+        row["assumed_pct"] = sum(t["assumed_lag"] for t in ts) / len(ts) * 100
+        if len(rets) >= 2:
+            sd = statistics.pstdev(rets)
+            row["edge_t"] = (sum(rets) / len(rets)) / (sd / len(rets) ** 0.5) if sd else 0.0
+        else:
+            row["edge_t"] = None
         n_min = s["mute_min_trades"]
-        if len(closed) < n_min:
+        too_fast = row["avg_hold_h"] is not None and row["avg_hold_h"] * 60 < s["min_hold_min"]
+        if is_bot(w) or row["trades_day"] > s["max_trades_day"] or (too_fast and len(closed) >= 3):
+            row["verdict"] = "BOT"
+            row["why"] = ("known bot" if is_bot(w) else f"{row['trades_day']:.0f} trades/day" if row["trades_day"] > s["max_trades_day"]
+                          else f"exits in ~{row['avg_hold_h'] * 60:.0f} min - too fast to copy by hand")
+        elif len(closed) < n_min:
             row["verdict"] = "LEARNING"
-        elif row["avg_ret"] > 0 and row["win_pct"] >= 40:
+            row["why"] = f"{len(closed)}/{n_min:g} closed trades"
+        elif row["avg_ret"] > 0 and row["median_ret"] > 0 and row["win_pct"] >= 40 and (row["edge_t"] or 0) >= s["min_edge_t"]:
             row["verdict"] = "COPY"
+            row["why"] = f"edge {row['edge_t']:.1f}σ after costs + lag"
         elif row["avg_ret"] < 0:
             row["verdict"] = "MUTE"
+            row["why"] = "loses money when copied"
         else:
             row["verdict"] = "MIXED"
+            row["why"] = "profit could be luck (not significant)" if (row["edge_t"] or 0) < s["min_edge_t"] else "median trade loses"
         out.append(row)
     out.sort(key=lambda r: (r["verdict"] != "COPY", -(r["pnl_usd"] or 0)))
     res = {"size": size, "fee_pct": s["fee_pct"], "wallets": out,
@@ -310,6 +338,25 @@ def backtest(m, size=None, days=60):
            "total_pnl": sum(r["pnl_usd"] for r in out)}
     _bt_cache[key] = (time.time(), res)
     return res
+
+
+def copy_list(m):
+    """Wallets that pass the honest test - paste these into a copy-trade tool (Axiom / GMGN / fomo)."""
+    return [w for w in backtest(m)["wallets"] if w["verdict"] == "COPY"]
+
+
+def copy_now(m, minutes=60):
+    """Tracked buys from the last hour that get a CONSIDER."""
+    out = []
+    for e in m.tracker.query(kinds=["BUY"], limit=300):
+        if time.time() - (e.get("ts") or 0) > minutes * 60:
+            continue
+        h = copy_hint(m, e, (m._tok.get(e.get("mint")) or (0, {}))[1] or {})
+        if h and h["call"].startswith("✅"):
+            out.append({**{k: e.get(k) for k in ("ts", "wallet", "label", "group", "mint", "symbol", "usd", "price",
+                                                   "market_cap", "sig")}, "copy": h,
+                        "links": links(m, e["mint"], e.get("pair"), e.get("dex_url"))})
+    return out
 
 
 def verdicts(m):

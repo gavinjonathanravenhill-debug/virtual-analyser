@@ -147,6 +147,8 @@
     <div class="warn">Tools to decide faster, <b>not trade calls</b>. The copy test replays what you'd have made copying each wallet at the price
       <b>we</b> saw when their trade landed (so our real delay is baked in), minus fees and pool slippage for your size. Needs a couple of weeks of data
       before it means much; not financial advice.</div>
+    <div class="card" id="ed-now"><h3>✅ Copy now</h3><div class="dim">Loading…</div></div>
+    <div class="card" id="ed-list"><h3>📋 Copy list</h3><div class="dim">Loading…</div></div>
     <div class="card" id="ed-hot"><h3>🔥 Hot now (confluence, 24h)</h3><div class="dim">Loading…</div></div>
     <div class="card" id="ed-bt"><h3>🧪 Copy-trade test</h3><div class="dim">Loading…</div></div>
     <div class="grid2">
@@ -402,11 +404,27 @@ async function loadNetflow(h) {
 }
 
 // ---------- edge: hot list, copy-trade test, settings, real-time ----------
-const vcol = v => ({COPY: 'pos', MUTE: 'neg'})[v] || 'dim';
+const vcol = v => ({COPY: 'pos', MUTE: 'neg', BOT: 'neg'})[v] || 'dim';
+function copyText(t, btn) {
+  const done = () => { if (btn) { const o = btn.textContent; btn.textContent = '✓ copied'; setTimeout(() => btn.textContent = o, 1200); } };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).then(done, () => fallbackCopy(t, done));
+  else fallbackCopy(t, done);
+}
+function fallbackCopy(t, done) { const a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select(); try { document.execCommand('copy'); done(); } catch (e) { prompt('Copy this:', t); } a.remove(); }
+const addrCell = (a, label) => `<span style="font-family:monospace;font-size:11px;word-break:break-all">${a}</span> <button style="padding:1px 6px" onclick="copyText('${a}', this)">📋</button>${label ? `<div>${label}</div>` : ''}`;
 const sgnp = v => v == null ? '–' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${(+v).toFixed(1)}%</span>`;
 async function loadEdge() {
   try {
     const d = await api(API + '/edge');
+    $('#ed-now').innerHTML = '<h3>✅ Copy now (last hour)</h3>' + (d.copy_now.length ? '<table><tr><th class="l">When</th><th class="l">Wallet</th><th class="l">Token</th><th>Their buy</th><th>Mcap</th><th class="l">Why</th><th>Trade</th></tr>' +
+      d.copy_now.map(c => `<tr><td class="l">${ago(c.ts)}</td><td class="l">${c.label}</td><td class="l"><a href="#" onclick="openToken('${c.mint}');return false">${c.symbol || short(c.mint)}</a>
+        <button style="padding:1px 6px" title="Copy token address" onclick="copyText('${c.mint}', this)">📋</button></td><td>${usd(c.usd)}</td><td>${usd(c.market_cap)}</td>
+        <td class="l dim" style="font-size:11px">${c.copy.reasons.join(' · ')}</td><td>${c.links.map(([n, u]) => `<a href="${u}" target="_blank">${n}</a>`).join(' ')}</td></tr>`).join('') + '</table>'
+      : '<div class="dim">Nothing right now. A buy shows here only when a <b>proven</b> wallet (COPY below) buys, the price is still within 15% of their entry, your size won\'t move the pool much and the token isn\'t high-risk. Expect this to be empty most of the time - that\'s the point.</div>');
+    $('#ed-list').innerHTML = '<h3>📋 Copy list - wallets that pass the honest test</h3>' + (d.copy_list.length
+      ? `<div class="dim" style="margin-bottom:6px">Paste these into a copy-trade tool (Axiom, GMGN, fomo) or keep 🔔 on and use ✅ Copy now. <button onclick="copyText('${d.copy_list.map(w => w.wallet).join('\\n')}', this)">📋 Copy all ${d.copy_list.length}</button></div><table>` +
+        d.copy_list.map(w => `<tr><td class="l">${addrCell(w.wallet, `<b>${w.label}</b> <span class="dim">${w.group || ''}</span>`)}</td><td>${w.closed} trades</td><td>win ${w.win_pct.toFixed(0)}%</td><td>avg ${sgnp(w.avg_ret)}</td><td>median ${sgnp(w.median_ret)}</td><td class="pos">${usd(w.pnl_usd)}</td><td class="dim">${w.why}</td></tr>`).join('') + '</table>'
+      : '<div class="dim">No wallet passes yet. To qualify it needs 8+ closed copied trades, a positive average <b>and</b> median after fees, slippage and a realistic lag, 40%+ wins, a statistically real edge (not luck), holds longer than a few minutes and isn\'t a bot. Give it a week or two of tracking.</div>');
     $('#ed-hot').innerHTML = '<h3>🔥 Hot now (confluence, 24h)</h3>' + (d.hot.length ? '<table><tr><th class="l">Token</th><th>Score</th><th>Buyers</th><th>Bought</th><th>Mcap</th><th>1h</th><th>Since 1st buy</th><th class="l">Why</th><th>Trade</th></tr>' +
       d.hot.map(h => `<tr class="click" onclick="openToken('${h.mint}')"><td class="l">${h.symbol || short(h.mint)}</td>
         <td><b class="${h.score >= 70 ? 'pos' : h.score < 40 ? 'neg' : ''}">${h.score}</b></td><td>${h.buyers}${h.copy_buyers ? ` <span class="pos">(${h.copy_buyers}🏅)</span>` : ''}</td>
@@ -415,14 +433,15 @@ async function loadEdge() {
         <td onclick="event.stopPropagation()">${h.links.map(([n, u]) => `<a href="${u}" target="_blank">${n}</a>`).join(' ')}</td></tr>`).join('') + '</table>'
       : '<div class="dim">Nothing yet - fills as your wallets buy (trades of $' + d.settings.copy_min_usd + '+ are recorded).</div>');
     const b = d.backtest;
-    $('#ed-bt').innerHTML = `<h3>🧪 Copy-trade test - $${b.size} per trade, ${b.fee_pct}% fees + slippage</h3>` +
-      `<div class="dim" style="margin-bottom:6px">Total if you'd copied every recorded buy: <b class="${b.total_pnl >= 0 ? 'pos' : 'neg'}">${usd(b.total_pnl)}</b>. Exit = when they sold (or a 7-day time stop). 🏅 COPY = profitable after costs, MUTE = loses money copied (Telegram buys muted), LEARNING = fewer than ${d.settings.mute_min_trades} closed trades.</div>` +
-      (b.wallets.length ? '<table><tr><th class="l">Wallet</th><th>Verdict</th><th>Copied</th><th>Closed</th><th>Win</th><th>Avg</th><th>Median</th><th>P&amp;L</th><th>Best / worst</th><th>Avg hold</th><th>Your lag</th></tr>' +
-      b.wallets.map(w => `<tr><td class="l">${w.label} <span class="dim">${w.group || ''}</span></td><td><b class="${vcol(w.verdict)}">${w.verdict}</b></td>
+    $('#ed-bt').innerHTML = `<h3>🧪 Copy-trade test - $${b.size} per trade, ${b.fee_pct}% fees + slippage + realistic lag</h3>` +
+      `<div class="dim" style="margin-bottom:6px">Total if you'd copied every recorded buy: <b class="${b.total_pnl >= 0 ? 'pos' : 'neg'}">${usd(b.total_pnl)}</b>. Exit = when they sold (or a 7-day time stop). 🏅 COPY = profitable after costs, MUTE = loses money copied (Telegram buys muted), LEARNING = fewer than ${d.settings.mute_min_trades} closed trades, BOT = too fast / too many trades to copy by hand, MIXED = profit could be luck.</div>` +
+      (b.wallets.length ? '<table><tr><th class="l">Wallet</th><th>Verdict</th><th>Copied</th><th>Closed</th><th>Win</th><th>Avg</th><th>Median</th><th>P&amp;L</th><th>Best / worst</th><th>Avg hold</th><th>Your lag</th><th>Trades/day</th></tr>' +
+      b.wallets.map(w => `<tr><td class="l">${w.label} <span class="dim">${w.group || ''}</span><div>${addrCell(w.wallet)}</div></td><td><b class="${vcol(w.verdict)}">${w.verdict}</b><div class="dim" style="font-size:10px;max-width:160px">${w.why || ''}</div></td>
         <td>${w.copied}</td><td>${w.closed}</td><td>${w.win_pct == null ? '–' : w.win_pct.toFixed(0) + '%'}</td><td>${sgnp(w.avg_ret)}</td><td>${sgnp(w.median_ret)}</td>
         <td class="${w.pnl_usd >= 0 ? 'pos' : 'neg'}">${usd(w.pnl_usd)}</td><td>${sgnp(w.best)} / ${sgnp(w.worst)}</td>
         <td>${w.avg_hold_h == null ? '–' : w.avg_hold_h < 48 ? w.avg_hold_h.toFixed(1) + 'h' : (w.avg_hold_h / 24).toFixed(1) + 'd'}</td>
-        <td title="How much higher our entry was than theirs, on average">${sgnp(w.avg_chase)}</td></tr>`).join('') + '</table>'
+        <td title="How much higher our entry was than theirs, on average">${w.assumed_pct > 50 ? `<span class="dim" title="No independent price for most of these trades - assumed ${d.settings.assumed_lag_pct}% worse in and out">assumed</span>` : sgnp(w.avg_chase)}</td>
+        <td>${w.trades_day != null ? w.trades_day.toFixed(0) : '–'}</td></tr>`).join('') + '</table>'
       : '<div class="dim">No copied trades yet - the test starts filling from the next buys your wallets make.</div>');
     const s = d.settings;
     const f = (id, label, val, hint = '') => `<label style="display:block;margin:6px 0"><span class="dim" style="display:inline-block;width:190px">${label}</span>
