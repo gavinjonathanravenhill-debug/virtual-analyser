@@ -42,6 +42,8 @@ edge.DEFAULTS.update({
     "mg_min_vol_1h": 20000,
     "mg_min_buyers_1h": 60,
     "mg_max_tx_per_buyer": 6,        # lots of trades per unique buyer = bots / wash
+    "mg_max_vol_mcap_1h": 5,         # 1h volume above this many x the mcap = wash / bot churn
+    "mg_min_liq_mcap_pct": 4,        # liquidity under this % of mcap = the mcap is fake / one sell moves it
     "mg_max_bundlers": 15,
     "mg_max_snipers": 10,
     "mg_max_insiders": 10,
@@ -159,6 +161,20 @@ def load(hours=None):
 
 
 # ------------------------------------------------------------- filters ----
+def rug_reason(p):
+    """Price collapsed or liquidity pulled - dead, not just filtered."""
+    ch1, ch24, liq, mc = p.get("chg_1h"), p.get("chg_24h"), p.get("liq"), p.get("mcap")
+    if ch1 is not None and ch1 <= -90:
+        return f"rugged: {ch1:.0f}% in 1h"
+    if ch24 is not None and ch24 <= -95:
+        return f"rugged: {ch24:.0f}% in 24h"
+    if liq is not None and liq < 1500:
+        return f"rugged: liquidity pulled ({sig.fmt_usd(liq)})"
+    if mc is not None and mc < 2000:
+        return f"rugged: mcap {sig.fmt_usd(mc)}"
+    return None
+
+
 def metric_reasons(p, s):
     why = []
     age_h = (time.time() - (p.get("created") or time.time())) / 3600
@@ -174,6 +190,10 @@ def metric_reasons(p, s):
     buyers = p.get("buyers_1h") or 0
     if buyers < s["mg_min_buyers_1h"]:
         why.append(f"only {buyers} buyers in 1h")
+    if mc and (p.get("vol_1h") or 0) / mc > s["mg_max_vol_mcap_1h"]:
+        why.append(f"1h volume {(p.get('vol_1h') or 0) / mc:.0f}x the mcap (wash / bots)")
+    if mc and p.get("liq") is not None and p["liq"] / mc * 100 < s["mg_min_liq_mcap_pct"]:
+        why.append(f"liquidity only {p['liq'] / mc * 100:.1f}% of mcap (fake mcap)")
     tx = (p.get("buys_1h") or 0) + (p.get("sells_1h") or 0)
     uniq = buyers + (p.get("sellers_1h") or 0)
     if uniq and tx / uniq > s["mg_max_tx_per_buyer"]:
@@ -424,9 +444,15 @@ def scan():
             print(f"migrated refresh failed: {e}")
     results = []
     for p in {p["mint"]: p for p in fresh}.values():
+        prev = known.get(p["mint"]) or {}
+        rug = rug_reason(p)
+        if rug:
+            row = {**p, "reasons": [rug], "status": "rugged"}
+            _save(row)
+            results.append((row, prev.get("audit"), prev))
+            continue
         why = metric_reasons(p, s)
         row = {**p, "reasons": why}
-        prev = known.get(p["mint"]) or {}
         a = prev.get("audit")
         if not why and not a and ST_KEY and _audit_budget():
             try:
@@ -442,7 +468,7 @@ def scan():
         _save(row)
         results.append((row, a, prev))
     # spike forensics: coins moving hard on volume right now (keeps GeckoTerminal calls small)
-    movers = sorted((r for r, _, _ in results if (abs(r.get("chg_m5") or 0) >= 20 or abs(r.get("chg_1h") or 0) >= 60)
+    movers = sorted((r for r, _, _ in results if r.get("status") != "rugged" and (abs(r.get("chg_m5") or 0) >= 20 or abs(r.get("chg_1h") or 0) >= 60)
                      and (r.get("vol_1h") or 0) >= 10000), key=lambda r: -abs(r.get("chg_m5") or 0))[:3]
     spiked = {}
     for r in movers:
@@ -521,7 +547,8 @@ def track_wallets(mint, which="operators", group="Spike insiders"):
 def summary():
     s = edge.settings()
     rows = load()
-    rows.sort(key=lambda r: (r["status"] != "pass", -((r.get("metrics") or {}).get("vol_1h") or 0)))
+    rank = {"pass": 0, "pending": 1, "fail": 2, "rugged": 3}
+    rows.sort(key=lambda r: (rank.get(r["status"], 2), -((r.get("metrics") or {}).get("vol_1h") or 0)))
     out = []
     for r in rows[:150]:
         m = r.get("metrics") or {}
@@ -530,7 +557,8 @@ def summary():
                                              "buyers_1h", "buys_1h", "sells_1h", "chg_m5", "chg_1h", "price")},
                     "mint": r["mint"], "status": r["status"], "reasons": r.get("reasons") or [], "audit": r.get("audit"),
                     "pattern": sp.get("pattern"), "manipulation": sp.get("manipulation"), "spiked_at": r.get("spiked_at")})
-    return {"rows": out, "st_key": bool(ST_KEY), "audits_today": _audits_today["n"], "status": _status,
+    counts = {k: sum(1 for r in rows if r["status"] == k) for k in ("pass", "fail", "rugged")}
+    return {"rows": out, "st_key": bool(ST_KEY), "counts": counts, "audits_today": _audits_today["n"], "status": _status,
             "settings": {k: v for k, v in s.items() if k.startswith("mg_")}}
 
 

@@ -162,7 +162,8 @@
       before the spike, who sold into it, and how much of the volume is wash. Most migrated coins go to zero - this filters junk, it doesn't find winners for you.</div>
     <div class="card"><div class="controls" style="flex-wrap:wrap;gap:6px;margin:0">
       <span id="mg-status" class="dim" style="flex:1">Loading…</span>
-      <label class="dim"><input type="checkbox" id="mg-passonly" checked onchange="loadMigrated()"> passing only</label>
+      <label class="dim">Show <select id="mg-show" onchange="loadMigrated()"><option value="pass">passing only</option><option value="spikes">passing + spikes</option>
+        <option value="all">everything</option><option value="rugged">💀 rugs only</option></select></label>
       <button onclick="mgScan()">🔄 Scan now</button>
       <input id="mg-mint" placeholder="Any Solana token address → forensics" style="min-width:300px">
       <button onclick="mgAnalyse($('#mg-mint').value.trim())">🔬 Analyse</button>
@@ -556,15 +557,17 @@ async function loadMigrated() {
     const d = await api('/api/solana/migrated');
     const s = d.settings, st = d.status || {};
     $('#mg-status').innerHTML = `${st.last ? 'Last scan ' + ago(st.last) : 'First scan runs ~20s after start, then every 5 min'}` +
-      (st.last_result ? ` · ${st.last_result.migrated} migrated coins, <b class="pos">${st.last_result.pass} pass</b>, ${st.last_result.spikes} spikes analysed` : '') +
+      (d.counts ? ` · last 24h: <b class="pos">${d.counts.pass} pass</b>, ${d.counts.fail} filtered, 💀 ${d.counts.rugged} rugged` : '') +
+      (st.last_result ? ` · last scan ${st.last_result.spikes} spikes analysed` : '') +
       ` · audits today ${d.audits_today}/${s.mg_audit_per_day}` + (d.st_key ? '' : ' · <b class="neg">no SOLANATRACKER_API_KEY - bundler/sniper audit off</b>') +
       (st.error ? ` · <span class="err">${st.error}</span>` : '');
-    const rows = d.rows.filter(r => !$('#mg-passonly').checked || r.status === 'pass' || r.manipulation);
+    const show = $('#mg-show').value;
+    const rows = d.rows.filter(r => show === 'all' || (show === 'rugged' ? r.status === 'rugged' : r.status === 'pass' || (show === 'spikes' && r.manipulation != null && r.status !== 'rugged')));
     $('#mg-table').innerHTML = '<tr><th class="l">Token</th><th></th><th>Age</th><th>Mcap</th><th>Liq</th><th>1h vol</th><th>Buyers 1h</th><th>5m</th><th>1h</th>' +
       '<th>Bundl.</th><th>Snipers</th><th>Insiders</th><th>Dev</th><th>Top10</th><th>Holders</th><th>Spike</th><th>Manip.</th></tr>' +
       (rows.map(r => { const a = r.audit; return `<tr class="click" onclick="mgAnalyse('${r.mint}')" title="${(r.reasons || []).join(' · ').replace(/"/g, '')}">
-        <td class="l">${r.symbol || short(r.mint)} <span class="dim" style="font-size:10px">${r.dex || ''}</span></td>
-        <td>${r.status === 'pass' ? '✅' : '<span class="dim" title="' + (r.reasons || []).join(' · ').replace(/"/g, '') + '">❌</span>'}</td>
+        <td class="l">${r.symbol || short(r.mint)} <span class="dim" style="font-size:10px">${r.dex || ''}</span>${r.status !== 'pass' && (r.reasons || []).length ? `<div class="dim" style="font-size:10px">${r.reasons[0]}${r.reasons.length > 1 ? ' +' + (r.reasons.length - 1) : ''}</div>` : ''}</td>
+        <td>${r.status === 'pass' ? '✅' : r.status === 'rugged' ? '<span title="' + (r.reasons || []).join(' · ').replace(/"/g, '') + '">💀</span>' : '<span class="dim" title="' + (r.reasons || []).join(' · ').replace(/"/g, '') + '">❌</span>'}</td>
         <td>${r.created ? ago(r.created).replace(' ago', '') : '–'}</td><td>${usd(r.mcap)}</td><td>${usd(r.liq)}</td><td>${usd(r.vol_1h)}</td>
         <td>${r.buyers_1h ?? '–'}</td><td>${sgnp(r.chg_m5)}</td><td>${sgnp(r.chg_1h)}</td>
         <td>${aud(a, 'bundlers', s.mg_max_bundlers)}</td><td>${aud(a, 'snipers', s.mg_max_snipers)}</td><td>${aud(a, 'insiders', s.mg_max_insiders)}</td>
@@ -575,6 +578,7 @@ async function loadMigrated() {
     const f = (k, label) => `<label style="display:inline-block;margin:4px 10px 4px 0"><span class="dim">${label}</span> <input id="mgs-${k}" value="${Array.isArray(s[k]) ? s[k].join(', ') : s[k]}" style="width:${k === 'mg_dexes' ? 260 : 80}px"></label>`;
     $('#mg-set').innerHTML = f('mg_max_age_h', 'Max age (h)') + f('mg_min_liq', 'Min liq $') + f('mg_min_mcap', 'Min mcap $') + f('mg_max_mcap', 'Max mcap $') +
       f('mg_min_vol_1h', 'Min 1h vol $') + f('mg_min_buyers_1h', 'Min buyers 1h') + f('mg_max_tx_per_buyer', 'Max trades/wallet') + '<br>' +
+      f('mg_max_vol_mcap_1h', 'Max 1h vol ÷ mcap (x)') + f('mg_min_liq_mcap_pct', 'Min liq ÷ mcap %') + '<br>' +
       f('mg_max_bundlers', 'Max bundlers %') + f('mg_max_snipers', 'Max snipers %') + f('mg_max_insiders', 'Max insiders %') + f('mg_max_dev', 'Max dev %') +
       f('mg_max_top10', 'Max top10 %') + f('mg_min_holders', 'Min holders') + f('mg_audit_per_day', 'Audits/day') + '<br>' + f('mg_dexes', 'DEXes') +
       `<label class="dim">Alerts <select id="mgs-mg_alerts">${['both', 'clean', 'spikes', 'off'].map(o => `<option ${o === s.mg_alerts ? 'selected' : ''}>${o}</option>`).join('')}</select></label>
