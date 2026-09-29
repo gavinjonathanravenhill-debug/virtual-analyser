@@ -575,7 +575,7 @@ async function loadMigrated() {
         <td>${aud(a, 'dev', s.mg_max_dev)}</td><td>${aud(a, 'top10', s.mg_max_top10)}</td><td>${a && a.holders != null ? a.holders : '–'}</td>
         <td>${r.pattern ? `<b class="${r.pattern === 'held' ? 'pos' : r.pattern === 'running' ? '' : 'neg'}">${r.pattern}</b>` : '–'}</td>
         <td>${r.manipulation != null ? `<b class="${r.manipulation >= 60 ? 'neg' : r.manipulation >= 30 ? '' : 'pos'}">${r.manipulation}</b>` : '–'}</td></tr>`; }).join('')
-       || '<tr><td colspan=17 class="dim l">Nothing passing yet - untick "passing only" to see everything the scanner saw.</td></tr>');
+       || '<tr><td colspan=17 class="dim l">Nothing passing right now - set Show to "everything" to see what the scanner saw and why each coin failed.</td></tr>');
     const f = (k, label) => `<label style="display:inline-block;margin:4px 10px 4px 0"><span class="dim">${label}</span> <input id="mgs-${k}" value="${Array.isArray(s[k]) ? s[k].join(', ') : s[k]}" style="width:${k === 'mg_dexes' ? 260 : 80}px"></label>`;
     $('#mg-set').innerHTML = f('mg_max_age_h', 'Max age (h)') + f('mg_min_liq', 'Min liq $') + f('mg_min_mcap', 'Min mcap $') + f('mg_max_mcap', 'Max mcap $') +
       f('mg_min_vol_1h', 'Min 1h vol $') + f('mg_min_buyers_1h', 'Min buyers 1h') + f('mg_max_tx_per_buyer', 'Max trades/wallet') + '<br>' +

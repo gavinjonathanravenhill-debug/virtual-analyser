@@ -34,7 +34,7 @@ GT_GAP = float(os.getenv("GT_GAP_SECONDS", "6.5"))     # free GeckoTerminal ~10 
 SCAN_SECONDS = int(os.getenv("MIGRATED_SCAN_SECONDS", "300"))
 
 edge.DEFAULTS.update({
-    "mg_dexes": ["pumpswap", "raydium-cpmm", "raydium-cp", "meteora-damm-v2"],
+    "mg_dexes": ["pumpswap", "meteora-damm-v2", "raydium-cpmm"],
     "mg_max_age_h": 24,
     "mg_min_liq": 15000,
     "mg_min_mcap": 40000,
@@ -155,6 +155,32 @@ def load(hours=None):
 
 
 # ------------------------------------------------------------- filters ----
+def _fill_from_dexscreener(pools):
+    """GeckoTerminal reports $0 liquidity (and odd early price changes) for Meteora pools - use DexScreener there."""
+    need = [p for p in pools if not p.get("liq") or (p.get("dex") or "").startswith("meteora")]
+    if not need:
+        return
+    try:
+        import solana_client as sc
+        info = sc.token_info([p["mint"] for p in need])
+    except Exception as e:
+        print(f"dexscreener fill failed: {e}")
+        return
+    for p in need:
+        t = info.get(p["mint"]) or {}
+        if t.get("liquidity"):
+            p["liq"] = t["liquidity"]
+            p["liq_src"] = "dexscreener"
+        elif not p.get("liq"):
+            p["liq"] = None            # unknown - never treated as "pulled"
+        if t.get("market_cap"):
+            p["mcap"] = t["market_cap"]
+        if t.get("change_1h") is not None:
+            p["chg_1h"] = t["change_1h"]
+        if t.get("change_24h") is not None:
+            p["chg_24h"] = t["change_24h"]
+
+
 def rug_reason(p):
     """Price collapsed or liquidity pulled - dead, not just filtered."""
     ch1, ch24, liq, mc = p.get("chg_1h"), p.get("chg_24h"), p.get("liq"), p.get("mcap")
@@ -162,7 +188,7 @@ def rug_reason(p):
         return f"rugged: {ch1:.0f}% in 1h"
     if ch24 is not None and ch24 <= -95:
         return f"rugged: {ch24:.0f}% in 24h"
-    if liq is not None and liq < 1500:
+    if liq is not None and liq < 1500 and p.get("liq_src") != "unknown":
         return f"rugged: liquidity pulled ({sig.fmt_usd(liq)})"
     if mc is not None and mc < 2000:
         return f"rugged: mcap {sig.fmt_usd(mc)}"
@@ -174,7 +200,9 @@ def metric_reasons(p, s):
     age_h = (time.time() - (p.get("created") or time.time())) / 3600
     if age_h > s["mg_max_age_h"]:
         why.append(f"older than {s['mg_max_age_h']:g}h")
-    if (p.get("liq") or 0) < s["mg_min_liq"]:
+    if p.get("liq") is None:
+        why.append("liquidity unknown")
+    elif p["liq"] < s["mg_min_liq"]:
         why.append(f"liquidity {sig.fmt_usd(p.get('liq'))} < {sig.fmt_usd(s['mg_min_liq'])}")
     mc = p.get("mcap") or 0
     if mc < s["mg_min_mcap"] or mc > s["mg_max_mcap"]:
@@ -422,13 +450,22 @@ def scan():
     s = edge.settings()
     dexes = {d.lower() for d in s["mg_dexes"]}
     found = []
-    for page in (1, 2):
+    for page in (1, 2, 3):
         try:
             found += parse_pools(gt("/networks/solana/new_pools", page=page, include="base_token,dex"))
         except Exception as e:
             print(f"migrated scan (new pools) failed: {e}")
             break
-    fresh = [p for p in found if (p.get("dex") or "").lower() in dexes]
+    # ~20 new pools a minute (mostly pump.fun curves), so also pull each migration DEX's busiest pools of the
+    # last 24h - that's where the migrations that actually trade show up, even if we missed their first minutes
+    for dex in list(dexes)[:4]:
+        try:
+            found += parse_pools(gt(f"/networks/solana/dexes/{dex}/pools", page=1, sort="h24_tx_count_desc",
+                                    include="base_token,dex"))
+        except Exception as e:
+            print(f"migrated scan ({dex}) skipped: {e}")
+    fresh = [p for p in found if (p.get("dex") or "").lower() in dexes
+             and time.time() - (p.get("created") or 0) <= s["mg_max_age_h"] * 3600]
     known = {r["mint"]: r for r in load()}
     # refresh metrics for coins already on the list (30 pools per call)
     stale = [r["pool"] for m, r in known.items() if m not in {p["mint"] for p in fresh}]
@@ -437,8 +474,10 @@ def scan():
             fresh += parse_pools(gt("/networks/solana/pools/multi/" + ",".join(stale[i:i + 30]), include="base_token,dex"))
         except Exception as e:
             print(f"migrated refresh failed: {e}")
+    uniq = {p["mint"]: p for p in fresh}
+    _fill_from_dexscreener(list(uniq.values()))
     results = []
-    for p in {p["mint"]: p for p in fresh}.values():
+    for p in uniq.values():
         prev = known.get(p["mint"]) or {}
         rug = rug_reason(p)
         if rug:
