@@ -128,7 +128,10 @@ def is_meme(symbol):
 
 
 def scan(memes_only=False, sort="move", **over):
-    cfg = {**DEFAULTS, **{k: _f(v) for k, v in over.items() if k in DEFAULTS and v not in (None, "")}}
+    cfg = dict(DEFAULTS)
+    for k, v in over.items():
+        if k in DEFAULTS and _f(v, None) is not None and _f(v) >= 0:
+            cfg[k] = _f(v)
     sizes = contract_sizes()
     rows = []
     for t in tickers():
