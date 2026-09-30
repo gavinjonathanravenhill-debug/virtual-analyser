@@ -674,9 +674,42 @@ def _alerts(results, spiked, s, chain):
                   f"{edge.links_html(m, mint, an['pool'])}", group="Migrated")
 
 
-def track_wallets(mint, which="operators", group="Spike insiders", chain="solana"):
-    """Add the pre-spike buyers / operators of a coin to that chain's tracker."""
+EARLY_GROUP, INSIDER_GROUP = "Early on spike", "Spike insiders"
+
+
+def _trades_per_day(w, chain):
+    """How busy a wallet is (last ~1000 txs). None when we can't tell (non-Solana chain / RPC error)."""
+    if chain != "solana":
+        return None
+    try:
+        import solana_client as sc
+        sigs = [x for x in sc.signatures(w, limit=1000) if x.get("blockTime")]
+    except Exception:
+        return None
+    if len(sigs) < 2:
+        return 0.0
+    span_d = max(1 / 24, (sigs[0]["blockTime"] - sigs[-1]["blockTime"]) / 86400)
+    return len(sigs) / span_d
+
+
+def _spike_count(chain, w, sym):
+    """Distinct coins this wallet was early on (from its tracker note), including this one."""
+    with sig._db_lock, sig.db() as c:
+        r = c.execute("SELECT note FROM wallets WHERE chain=? AND address=?", (chain, w)).fetchone()
+    coins = [x for x in ((r["note"] if r else "") or "").split("early on: ")[-1].split(",") if x.strip()] \
+        if r and "early on: " in (r["note"] or "") else []
+    coins = [x.strip() for x in coins]
+    if sym not in coins:
+        coins.append(sym)
+    return coins
+
+
+def track_wallets(mint, which="operators", group=EARLY_GROUP, chain="solana"):
+    """Add the pre-spike buyers / operators of a coin to that chain's tracker.
+    Busy wallets (> insider_max_trades_day) are bots that buy everything, so they're skipped. A wallet only gets
+    upgraded to "Spike insiders" once it has been early on insider_min_spikes different spikes."""
     m = module(chain)
+    s = edge.settings()
     with sig._db_lock, sig.db() as c:
         r = c.execute("SELECT symbol, spike FROM migrated WHERE mint=?", (mint,)).fetchone()
     an = json.loads(r["spike"]) if r and r["spike"] else analyse(mint, chain=chain)
@@ -684,21 +717,34 @@ def track_wallets(mint, which="operators", group="Spike insiders", chain="solana
     ws = f.get("operators") if which == "operators" else [x["wallet"] for x in f.get("pre_buyers") or [] if not x.get("bot")]
     ws = [edge._norm(w) for w in ws or [] if not edge.is_bot(w)]
     sym = (r["symbol"] if r else None) or mint[:6]
-    added = []
+    added, upgraded, too_busy = [], [], []
     for w in ws[:15]:
-        if w in m.WALLETS:
+        tpd = _trades_per_day(w, chain)
+        if tpd is not None and tpd > s["insider_max_trades_day"]:
+            too_busy.append({"wallet": w, "trades_day": round(tpd)})
             continue
-        sig.add_wallet(m, w, f"{sym} {'operator' if which == 'operators' else 'pre-spike'} {w[:6]}", group,
-                       note=f"{'bought before + sold into' if which == 'operators' else 'bought before'} the {sym} spike",
+        coins = _spike_count(chain, w, sym)
+        cur = m.WALLETS.get(w) or {}
+        cur_grp = cur.get("group") or ""
+        if w in m.WALLETS and cur_grp not in (EARLY_GROUP, INSIDER_GROUP):
+            continue       # already tracked under your own group - leave it alone
+        grp = INSIDER_GROUP if len(coins) >= s["insider_min_spikes"] else group
+        label = cur.get("label") if w in m.WALLETS else \
+            f"{sym} {'operator' if which == 'operators' else 'early'} {w[:6]}"
+        role = "bought before + sold into" if which == "operators" else "bought before"
+        sig.add_wallet(m, w, label, grp,
+                       note=f"{role} the {sym} spike" + (f" · ~{tpd:.0f} trades/day" if tpd is not None else "") +
+                            f" · early on: {', '.join(coins)}",
                        alert_on=True, min_usd=1000)
-        added.append(w)
+        (upgraded if grp == INSIDER_GROUP and cur_grp != INSIDER_GROUP else added).append(w)
     if chain == "solana":
         try:
             import helius_hook
             helius_hook.resync_async()
         except Exception:
             pass
-    return {"added": added, "skipped": len(ws) - len(added)}
+    return {"added": added, "upgraded": upgraded, "too_busy": too_busy,
+            "skipped": len(ws[:15]) - len(added) - len(upgraded) - len(too_busy)}
 
 
 def summary(chain="solana"):

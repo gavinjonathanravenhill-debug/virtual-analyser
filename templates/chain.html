@@ -59,7 +59,7 @@
   a.tx { color:var(--blue); text-decoration:none; }
 
   .chip { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; font-weight:600; color:#0b0f14; }
-  .g-Wintermute { background:#5fd16a; } .g-Market { background:#d9b36a; } .g-Bots { background:#e0a526; }
+  .g-Wintermute { background:#5fd16a; } .g-Early { background:#8a8f98; } .g-Market { background:#d9b36a; } .g-Bots { background:#e0a526; }
   .g-Whales { background:#dcdc3a; } .g-Clever { background:#e040d0; } .g-Other { background:#9aa5b1; }
   .g-Extra, .g-Lookup { background:#4aa3ff; }
   .g-PENGU { background:#8fd3ff; } .g-B2C2 { background:#c9a0ff; } .g-Robinhood { background:#cfff04; }
@@ -404,7 +404,7 @@ async function loadNetflow(h) {
 }
 
 // ---------- edge: hot list, copy-trade test, settings, real-time ----------
-const vcol = v => ({COPY: 'pos', MUTE: 'neg', BOT: 'neg'})[v] || 'dim';
+const vcol = v => ({COPY: 'pos', MUTE: 'neg', BOT: 'neg', MM: 'dim'})[v] || 'dim';
 function copyText(t, btn) {
   const done = () => { if (btn) { const o = btn.textContent; btn.textContent = '✓ copied'; setTimeout(() => btn.textContent = o, 1200); } };
   if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t).then(done, () => fallbackCopy(t, done));
@@ -434,11 +434,11 @@ async function loadEdge() {
       : '<div class="dim">Nothing yet - fills as your wallets buy (trades of $' + d.settings.copy_min_usd + '+ are recorded).</div>');
     const b = d.backtest;
     $('#ed-bt').innerHTML = `<h3>🧪 Copy-trade test - $${b.size} per trade, ${b.fee_pct}% fees + slippage + realistic lag</h3>` +
-      `<div class="dim" style="margin-bottom:6px">Total if you'd copied every recorded buy: <b class="${b.total_pnl >= 0 ? 'pos' : 'neg'}">${usd(b.total_pnl)}</b>. Exit = when they sold (or a 7-day time stop). 🏅 COPY = profitable after costs, MUTE = loses money copied (Telegram buys muted), LEARNING = fewer than ${d.settings.mute_min_trades} closed trades, BOT = too fast / too many trades to copy by hand, MIXED = profit could be luck.</div>` +
-      (b.wallets.length ? '<table><tr><th class="l">Wallet</th><th>Verdict</th><th>Copied</th><th>Closed</th><th>Win</th><th>Avg</th><th>Median</th><th>P&amp;L</th><th>Best / worst</th><th>Avg hold</th><th>Your lag</th><th>Trades/day</th></tr>' +
+      `<div class="dim" style="margin-bottom:6px">Total if you'd copied every recorded buy: <b class="${b.total_pnl >= 0 ? 'pos' : 'neg'}">${usd(b.total_pnl)}</b> at your prices vs <b class="${(b.total_pnl_theirs || 0) >= 0 ? 'pos' : 'neg'}">${usd(b.total_pnl_theirs || 0)}</b> at theirs (the gap is what copy lag + slippage costs you). Exit = when they sold (or a 7-day time stop). 🏅 COPY = profitable after costs, MUTE = loses money copied (Telegram buys muted), LEARNING = fewer than ${d.settings.mute_min_trades} closed trades, BOT = too fast / too many trades to copy by hand, MM = market maker (not scored, left out of totals), MIXED = profit could be luck. Losses are capped at -100%.</div>` +
+      (b.wallets.length ? '<table><tr><th class="l">Wallet</th><th>Verdict</th><th>Copied</th><th>Closed</th><th>Win</th><th>Avg</th><th>Median</th><th title="At your realistic copy prices">Your P&amp;L</th><th title="Same trades at the wallet's own prices - if this is green and yours is red, it's your lag, not the wallet">Their P&amp;L</th><th>Best / worst</th><th>Avg hold</th><th>Your lag</th><th>Trades/day</th></tr>' +
       b.wallets.map(w => `<tr><td class="l">${w.label} <span class="dim">${w.group || ''}</span><div>${addrCell(w.wallet)}</div></td><td><b class="${vcol(w.verdict)}">${w.verdict}</b><div class="dim" style="font-size:10px;max-width:160px">${w.why || ''}</div></td>
         <td>${w.copied}</td><td>${w.closed}</td><td>${w.win_pct == null ? '–' : w.win_pct.toFixed(0) + '%'}</td><td>${sgnp(w.avg_ret)}</td><td>${sgnp(w.median_ret)}</td>
-        <td class="${w.pnl_usd >= 0 ? 'pos' : 'neg'}">${usd(w.pnl_usd)}</td><td>${sgnp(w.best)} / ${sgnp(w.worst)}</td>
+        <td class="${w.pnl_usd >= 0 ? 'pos' : 'neg'}">${usd(w.pnl_usd)}</td><td class="${w.pnl_theirs_usd == null ? 'dim' : w.pnl_theirs_usd >= 0 ? 'pos' : 'neg'}" title="avg ${w.avg_theirs == null ? '–' : sgnp(w.avg_theirs)} per trade at their prices">${w.pnl_theirs_usd == null ? '–' : usd(w.pnl_theirs_usd)}</td><td>${sgnp(w.best)} / ${sgnp(w.worst)}</td>
         <td>${w.avg_hold_h == null ? '–' : w.avg_hold_h < 48 ? w.avg_hold_h.toFixed(1) + 'h' : (w.avg_hold_h / 24).toFixed(1) + 'd'}</td>
         <td title="How much higher our entry was than theirs, on average">${w.assumed_pct > 50 ? `<span class="dim" title="No independent price for most of these trades - assumed ${d.settings.assumed_lag_pct}% worse in and out">assumed</span>` : sgnp(w.avg_chase)}</td>
         <td>${w.trades_day != null ? w.trades_day.toFixed(0) : '–'}</td></tr>`).join('') + '</table>'
@@ -456,6 +456,9 @@ async function loadEdge() {
       `<label style="display:block;margin:6px 0"><span class="dim" style="display:inline-block;width:190px">Auto-mute losing wallets</span><input type="checkbox" id="st-mute" ${s.auto_mute ? 'checked' : ''}></label>` +
       f('st-mutemin', 'Mute after N closed trades', s.mute_min_trades) +
       f('st-gmin', 'Group minimums', Object.entries(s.group_min_usd || {}).map(([k, v]) => k + ':' + v).join(', '), 'e.g. fomo top:5000, Wintermute:25000') +
+      f('st-mm', 'Market-maker groups', (s.mm_groups || []).join(', '), 'not scored as copy targets, e.g. Wintermute') +
+      f('st-ins-tpd', 'Insider max trades/day', s.insider_max_trades_day, 'busier pre-spike buyers are skipped as bots') +
+      f('st-ins-n', 'Insider after N spikes', s.insider_min_spikes, 'early on this many coins = Spike insiders') +
       f('st-quiet', 'Quiet hours (UK)', s.quiet_hours, 'e.g. 00-07 - only exits/hot 85+ get through' + (d.quiet_now ? ' · <b>quiet now</b>' : '')) +
       f('st-digest', 'Digest groups', (s.digest_groups || []).join(', '), 'groups: ' + d.groups.filter(Boolean).join(', ')) +
       f('st-dmin', 'Digest every (min)', s.digest_minutes) +
@@ -490,7 +493,7 @@ async function saveSettings() {
   const v = id => $('#' + id).value;
   try {
     await send('POST', API + '/settings', {copy_size_usd: v('st-size'), fee_pct: v('st-fee'), late_pct: v('st-late'), max_slip_pct: v('st-slip'),
-      risk_gate: v('st-risk'), auto_mute: $('#st-mute').checked, mute_min_trades: v('st-mutemin'), group_min_usd: v('st-gmin'),
+      risk_gate: v('st-risk'), auto_mute: $('#st-mute').checked, mute_min_trades: v('st-mutemin'), group_min_usd: v('st-gmin'), mm_groups: v('st-mm'), insider_max_trades_day: v('st-ins-tpd'), insider_min_spikes: v('st-ins-n'),
       quiet_hours: v('st-quiet'), digest_groups: v('st-digest'), digest_minutes: v('st-dmin'), confluence_alert: v('st-conf'), my_tokens: v('st-mine')});
     alertBox('Settings saved'); loadEdge();
   } catch (e) { alertBox(e.message); }
@@ -653,18 +656,18 @@ async function mgAnalyse(mint) {
       </div>
       <div class="controls" style="margin-top:8px">
         <button onclick="mgTrack('${d.mint}','operators')">👁 Track operators</button>
-        <button onclick="mgTrack('${d.mint}','pre')">👁 Track all pre-spike buyers</button>
+        <button onclick="mgTrack('${d.mint}','pre')">👁 Track pre-spike buyers</button>
         <button onclick="openToken('${d.mint}')">Token details</button>
         ${CFG.chain === 'solana' ? `<a href="https://gmgn.ai/sol/token/${d.mint}" target="_blank"><button>GMGN</button></a>
         <a href="https://jup.ag/swap/SOL-${d.mint}" target="_blank"><button>Jupiter</button></a>` :
         `<a href="https://dexscreener.com/${CFG.dexscreener}/${d.mint}" target="_blank"><button>DexScreener</button></a>
         <a href="${CFG.token}${d.mint}${CFG.holders_suffix}" target="_blank"><button>Holders (${CFG.explorer_name})</button></a>`}</div>
-      <div class="note">Uses the pool's most recent ~300 trades (GeckoTerminal), so on busy coins older wallets can be missing. Tracked wallets go in group "Spike insiders" with alerts from $1k.</div>`;
+      <div class="note">Uses the pool's most recent ~300 trades (GeckoTerminal), so on busy coins older wallets can be missing. Tracked wallets go in group "Early on spike" with alerts from $1k. Wallets doing more than 50 trades/day are skipped as bots (Solana). A wallet is only promoted to "Spike insiders" once it's been early on 3+ different spikes.</div>`;
     mgChart(d.candles || [], d.spikes);
   } catch (e) { box.innerHTML = `<div class="err">Error: ${e.message}</div>`; }
 }
 async function mgTrack(mint, which) {
-  try { const d = await send('POST', API + '/migrated/track', {mint, which}); alertBox(`Now tracking ${d.added.length} wallets` + (d.skipped ? ` (${d.skipped} already tracked)` : '')); } catch (e) { alertBox(e.message); }
+  try { const d = await send('POST', API + '/migrated/track', {mint, which}); alertBox(`Now tracking ${d.added.length} wallets` + (d.upgraded && d.upgraded.length ? ` · ${d.upgraded.length} promoted to Spike insiders (early on 3+ spikes)` : '') + (d.too_busy && d.too_busy.length ? ` · ${d.too_busy.length} skipped as bots (${d.too_busy.map(x => x.trades_day).join(', ')} trades/day)` : '') + (d.skipped ? ` · ${d.skipped} already tracked in your own groups` : '')); } catch (e) { alertBox(e.message); }
 }
 
 function zoneForm(mint = '', price = null) {

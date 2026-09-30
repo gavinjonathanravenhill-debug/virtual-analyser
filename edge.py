@@ -46,7 +46,17 @@ DEFAULTS = {
     "min_hold_min": 20,          # wallets that usually exit faster than this can't be copied by hand
     "max_trades_day": 30,        # more than this = bot-like
     "min_edge_t": 1.5,           # COPY needs the average return to be this many standard errors above zero
+    "mm_groups": ["Wintermute", "Market makers"],   # market makers: tracked for flow, never scored as copy targets
+    "insider_max_trades_day": 50,  # pre-spike buyers busier than this are bots, not insiders - not tracked
+    "insider_min_spikes": 3,     # early on this many different spikes (and low-frequency) = upgraded to "Spike insiders"
 }
+
+
+def is_mm(wallet, group="", label=""):
+    """Market makers (Wintermute etc.) trade both sides for the spread - a copy win rate means nothing for them."""
+    g, l = (group or "").lower(), (label or "").lower()
+    return (any(x.lower() in g for x in settings().get("mm_groups") or []) or "market maker" in l
+            or "liquidity bot" in l or "market maker" in g)
 
 
 # ------------------------------------------------------------------ DB ----
@@ -64,6 +74,10 @@ def init_tables(c):
                  added INTEGER)""")
     for a, (label, note) in SEED_BOTS.items():
         c.execute("INSERT OR IGNORE INTO bots VALUES (?,?,?,?,?)", (a, label, note, "seed", int(time.time())))
+    # one-off: "Spike insiders" was given to every pre-spike buyer - they're only "early on a spike" until proven
+    if not c.execute("SELECT 1 FROM settings WHERE key='_mig_early_on_spike'").fetchone():
+        c.execute("UPDATE wallets SET grp='Early on spike' WHERE grp='Spike insiders'")
+        c.execute("INSERT OR REPLACE INTO settings VALUES ('_mig_early_on_spike', '1')")
 
 
 # ------------------------------------------------------------ known bots --
@@ -283,10 +297,15 @@ def backtest(m, size=None, days=60):
         else:
             exit_p = r["p24h"] or r["p1h"]
             closed, how, held = False, "open", now - r["ts"]
-        ret = (exit_p / entry - 1 - cost) if exit_p else None
+        # a position can't lose more than the stake - cap at -100% (fees can't push it past a total wipeout)
+        ret = max(-1.0, exit_p / entry - 1 - cost) if exit_p else None
+        # the same trade at THEIR prices (no lag, no slippage for your size) - separates "bad wallet" from "copy lag"
+        their_exit = (ex["their_price"] if ex else exit_p) if closed else None
+        ret_theirs = (max(-1.0, their_exit / r["their_price"] - 1 - s["fee_pct"] / 100)
+                      if r["their_price"] and their_exit else None)
         chase = (entry / r["their_price"] - 1) if r["their_price"] else None
         trades.append({**{k: r[k] for k in ("wallet", "label", "grp", "mint", "symbol", "ts", "liq", "mcap")},
-                       "entry": entry, "exit": exit_p, "ret": ret, "closed": closed, "how": how, "held": held,
+                       "entry": entry, "exit": exit_p, "ret": ret, "ret_theirs": ret_theirs, "closed": closed, "how": how, "held": held,
                        "cost": cost, "chase": chase, "assumed_lag": assumed,
                        "ret24": (r["p24h"] / entry - 1 - cost) if r["p24h"] else None})
     per = defaultdict(list)
@@ -298,12 +317,15 @@ def backtest(m, size=None, days=60):
         rets = sorted(t["ret"] for t in closed)
         r24 = [t["ret24"] for t in ts if t["ret24"] is not None]
         wi = sig.CHAINS[m.CHAIN].WALLETS.get(w) or {}
+        tr = [t["ret_theirs"] for t in closed if t["ret_theirs"] is not None]
         row = {"wallet": w, "label": wi.get("label") or ts[-1]["label"], "group": wi.get("group") or ts[-1]["grp"],
                "copied": len(ts), "closed": len(closed),
                "win_pct": sum(x > 0 for x in rets) / len(rets) * 100 if rets else None,
                "avg_ret": sum(rets) / len(rets) * 100 if rets else None,
                "median_ret": rets[len(rets) // 2] * 100 if rets else None,
                "pnl_usd": sum(rets) * size if rets else 0.0,
+               "avg_theirs": sum(tr) / len(tr) * 100 if tr else None,
+               "pnl_theirs_usd": sum(tr) * size if tr else None,
                "best": rets[-1] * 100 if rets else None, "worst": rets[0] * 100 if rets else None,
                "avg_hold_h": sum(t["held"] for t in closed) / len(closed) / 3600 if closed else None,
                "hold24_avg": sum(r24) / len(r24) * 100 if r24 else None,
@@ -319,10 +341,17 @@ def backtest(m, size=None, days=60):
             row["edge_t"] = None
         n_min = s["mute_min_trades"]
         too_fast = row["avg_hold_h"] is not None and row["avg_hold_h"] * 60 < s["min_hold_min"]
-        if is_bot(w) or row["trades_day"] > s["max_trades_day"] or (too_fast and len(closed) >= 3):
+        lag_note = ""
+        if row["avg_theirs"] is not None and row["avg_ret"] is not None and row["avg_theirs"] > 0 > row["avg_ret"]:
+            lag_note = f" - profitable at their prices ({row['avg_theirs']:+.1f}% avg), your lag kills it"
+        row["mm"] = is_mm(w, row["group"], row["label"])
+        if row["mm"]:
+            row["verdict"] = "MM"
+            row["why"] = "market maker - trades both sides for the spread; tracked for flow, not scored for copying"
+        elif is_bot(w) or row["trades_day"] > s["max_trades_day"] or (too_fast and len(closed) >= 3):
             row["verdict"] = "BOT"
             row["why"] = ("known bot" if is_bot(w) else f"{row['trades_day']:.0f} trades/day" if row["trades_day"] > s["max_trades_day"]
-                          else f"exits in ~{row['avg_hold_h'] * 60:.0f} min - too fast to copy by hand")
+                          else f"exits in ~{row['avg_hold_h'] * 60:.0f} min - too fast to copy by hand") + lag_note
         elif len(closed) < n_min:
             row["verdict"] = "LEARNING"
             row["why"] = f"{len(closed)}/{n_min:g} closed trades"
@@ -331,15 +360,16 @@ def backtest(m, size=None, days=60):
             row["why"] = f"edge {row['edge_t']:.1f}σ after costs + lag"
         elif row["avg_ret"] < 0:
             row["verdict"] = "MUTE"
-            row["why"] = "loses money when copied"
+            row["why"] = "loses money when copied" + lag_note
         else:
             row["verdict"] = "MIXED"
             row["why"] = "profit could be luck (not significant)" if (row["edge_t"] or 0) < s["min_edge_t"] else "median trade loses"
         out.append(row)
-    out.sort(key=lambda r: (r["verdict"] != "COPY", -(r["pnl_usd"] or 0)))
+    out.sort(key=lambda r: (r["verdict"] == "MM", r["verdict"] != "COPY", -(r["pnl_usd"] or 0)))
     res = {"size": size, "fee_pct": s["fee_pct"], "wallets": out,
            "trades": sorted(trades, key=lambda t: -t["ts"])[:200],
-           "total_pnl": sum(r["pnl_usd"] for r in out)}
+           "total_pnl": sum(r["pnl_usd"] for r in out if not r["mm"]),
+           "total_pnl_theirs": sum(r["pnl_theirs_usd"] or 0 for r in out if not r["mm"])}
     _bt_cache[key] = (time.time(), res)
     return res
 
