@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perps Scanner</title>
+<style>
+  :root { --bg:#0b0f14; --panel:#131a22; --line:#223040; --text:#dbe4ee; --dim:#7f8fa3;
+          --green:#2ecc71; --red:#ff5c5c; --amber:#f5b041; --blue:#4aa3ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { padding:16px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  header a { color:var(--dim); text-decoration:none; font-size:13px; }
+  .controls { display:flex; gap:8px; align-items:center; color:var(--dim); flex-wrap:wrap; }
+  select, input, button { background:var(--panel); color:var(--text); border:1px solid var(--line);
+                          border-radius:6px; padding:6px 10px; font:inherit; }
+  input { width:90px; } button { cursor:pointer; } button:hover { border-color:var(--blue); }
+  main { padding:20px; max-width:1400px; margin:0 auto; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:16px; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .tile .k { color:var(--dim); font-size:12px; } .tile .v { font-size:18px; font-weight:600; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th, td { padding:6px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+  th { color:var(--dim); font-weight:500; font-size:12px; cursor:pointer; }
+  th:first-child, td:first-child { text-align:left; }
+  tr.thin td { background:rgba(255,92,92,.05); }
+  .pos { color:var(--green); } .neg { color:var(--red); } .dim { color:var(--dim); }
+  .flag { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; font-weight:600; margin-left:3px; }
+  .THIN { background:#3a1216; color:var(--red); } .WIDE { background:#3a1f12; color:#ff8a4a; }
+  .LOWVOL { background:#3a3212; color:var(--amber); } .OK { background:#123a24; color:var(--green); }
+  .meme { font-size:11px; color:var(--amber); margin-left:4px; }
+  .note { color:var(--dim); font-size:12px; margin:10px 0 0; }
+  .err { color:var(--red); padding:12px 0; }
+  a.sym { color:var(--text); text-decoration:none; font-weight:600; } a.sym:hover { color:var(--blue); }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ MEXC Perps Scanner</h1>
+  <a href="/">Macro</a> <a href="/crypto-movers">Movers</a> <a href="/solana">Wallets</a>
+  <div class="controls" style="margin-left:auto">
+    <label><input type="checkbox" id="memes" style="width:auto" checked> Memes only</label>
+    <select id="sort">
+      <option value="move">Top gainers 24h</option><option value="drop">Top losers 24h</option>
+      <option value="move1h">Top gainers 1h</option><option value="spike">Volume spike (1h vs avg)</option>
+      <option value="volume">24h volume</option><option value="depth">Deepest book</option>
+    </select>
+    <label><input type="checkbox" id="hidethin" style="width:auto"> Hide thin</label>
+    <button onclick="load()">↻ Refresh</button>
+  </div>
+</header>
+<main>
+  <div class="controls" style="margin-bottom:14px">
+    Thin if under $<input id="thin_usd" value="50000"> within ±<input id="depth_pct" value="2" style="width:50px">%
+    · wide spread over <input id="wide_pct" value="0.3" style="width:60px">%
+    · low volume under $<input id="lowvol_usd" value="1000000">
+    · <label><input type="checkbox" id="auto" style="width:auto" checked> auto-refresh 60s</label>
+  </div>
+  <div class="tiles" id="tiles"></div>
+  <div class="card" id="out"><div class="dim">Loading…</div></div>
+  <div class="note">
+    <b>THIN</b> = not much resting in the book near the price: a modest order moves it and a wick can liquidate leveraged positions.
+    <b>WIDE</b> = big bid/ask gap, you lose that on entry and exit. <b>LOWVOL</b> = little traded in 24h.
+    <b>Fill 1%</b> = roughly how much $ you could buy (or sell) before moving the price 1%.
+    <b>Vol spike</b> = last hour's turnover vs the 24h hourly average. Book and 1h data are fetched for the biggest movers
+    and biggest-volume perps only. Data: MEXC public futures API.
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const usd = v => v == null ? '–' : v >= 1e9 ? '$' + (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? '$' + (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? '$' + (v / 1e3).toFixed(0) + 'k' : '$' + v.toFixed(0);
+const pct = (v, d = 1) => v == null ? '–' : `<span class="${v > 0 ? 'pos' : v < 0 ? 'neg' : 'dim'}">${v > 0 ? '+' : ''}${v.toFixed(d)}%</span>`;
+const price = p => p >= 100 ? p.toFixed(2) : p >= 1 ? p.toFixed(4) : p.toPrecision(4);
+let timer;
+async function load() {
+  const q = new URLSearchParams({memes: $('#memes').checked ? 1 : 0, sort: $('#sort').value});
+  for (const k of ['thin_usd', 'depth_pct', 'wide_pct', 'lowvol_usd']) q.set(k, $('#' + k).value);
+  try {
+    const r = await fetch('/api/perps/scan?' + q); const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    let rows = d.rows;
+    if ($('#hidethin').checked) rows = rows.filter(x => !x.flags.length);
+    const ok = d.rows.filter(x => !x.flags.length);
+    const best = ok.slice().sort((a, b) => b.chg_24h - a.chg_24h)[0];
+    const top = d.rows.slice().sort((a, b) => b.chg_24h - a.chg_24h)[0];
+    const spike = d.rows.filter(x => x.vol_spike).sort((a, b) => b.vol_spike - a.vol_spike)[0];
+    $('#tiles').innerHTML = [
+      ['Top mover (any)', top ? `${top.base} ${pct(top.chg_24h)} ${top.flags.map(f => `<span class="flag ${f}">${f}</span>`).join('')}` : '–'],
+      ['Top mover with a real book', best ? `${best.base} ${pct(best.chg_24h)}` : '–'],
+      ['Biggest volume spike', spike ? `${spike.base} ${spike.vol_spike.toFixed(1)}×` : '–'],
+      ['Flagged thin / wide / low vol', `${d.rows.length - ok.length} of ${d.rows.length}`],
+    ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+    $('#out').innerHTML = `<table><tr><th>Perp</th><th>Price</th><th>24h</th><th>1h</th><th>24h vol</th><th>Vol spike</th>
+      <th>Open interest</th><th>Funding</th><th>Spread</th><th>Book ±${d.cfg.depth_pct}%</th><th>Fill 1% buy / sell</th><th>Flags</th></tr>` +
+      rows.map(x => `<tr class="${x.flags.includes('THIN') ? 'thin' : ''}">
+        <td><a class="sym" target="_blank" href="https://futures.mexc.com/exchange/${x.symbol}">${x.base}</a>${x.meme ? '<span class="meme">meme</span>' : ''}</td>
+        <td>${price(x.price)}</td><td>${pct(x.chg_24h)}</td><td>${pct(x.chg_1h)}</td><td>${usd(x.vol_24h)}</td>
+        <td>${x.vol_spike == null ? '–' : `<span class="${x.vol_spike >= 3 ? 'pos' : ''}">${x.vol_spike.toFixed(1)}×</span>`}</td>
+        <td>${usd(x.oi_usd)}</td><td>${pct(x.funding_pct, 3)}</td>
+        <td>${x.spread_pct == null ? '–' : `<span class="${x.spread_pct > d.cfg.wide_pct ? 'neg' : ''}">${x.spread_pct.toFixed(2)}%</span>`}</td>
+        <td>${x.book_error ? '<span class="dim" title="' + x.book_error + '">n/a</span>' : usd(x.depth_usd)}</td>
+        <td>${usd(x.ask_1pct)} / ${usd(x.bid_1pct)}</td>
+        <td>${x.flags.length ? x.flags.map(f => `<span class="flag ${f}">${f}</span>`).join('') : '<span class="flag OK">OK</span>'}</td></tr>`).join('') +
+      `</table><div class="note">${d.rows.length} shown of ${d.scanned} USDT perps scanned · updated ${new Date(d.ts * 1000).toLocaleTimeString()}</div>`;
+  } catch (e) { $('#out').innerHTML = `<div class="err">Error: ${e.message}</div>`; }
+}
+function schedule() { clearInterval(timer); if ($('#auto').checked) timer = setInterval(load, 60000); }
+['memes', 'sort', 'hidethin'].forEach(id => $('#' + id).addEventListener('change', load));
+$('#auto').addEventListener('change', schedule);
+load(); schedule();
+</script>
+</body>
+</html>

@@ -115,6 +115,21 @@ except Exception as _e:
     print(f"wintermute realtime failed to start, continuing: {_e}")
 
 
+# ---- MEXC perps scanner (/perps) - behind the site password ----
+try:
+    from perps_scanner import perps_bp
+
+    @perps_bp.before_request
+    def _perps_auth():
+        auth = request.authorization
+        if not auth or not check_auth(auth.password):
+            return Response("Login required", 401, {"WWW-Authenticate": "Basic realm=\"Virtual Analyser\""})
+
+    app.register_blueprint(perps_bp)
+except Exception as _e:
+    print(f"perps scanner failed to load, continuing: {_e}")
+
+
 @app.route("/healthz")
 def healthz():
     """Unauthenticated - Railway's healthcheck has no credentials."""
