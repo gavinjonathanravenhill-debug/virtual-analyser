@@ -34,6 +34,15 @@
   .meme { font-size:11px; color:var(--amber); margin-left:4px; }
   .note { color:var(--dim); font-size:12px; margin:10px 0 0; }
   .err { color:var(--red); padding:12px 0; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:flex-start; justify-content:center; padding:24px 16px; z-index:10; overflow:auto; }
+  .modal.on { display:flex; }
+  .box { background:var(--panel); border:1px solid var(--line); border-radius:10px; width:min(1000px,100%); padding:18px; }
+  .box h2 { margin:0 0 4px; font-size:18px; } .box h3 { margin:16px 0 6px; font-size:14px; }
+  .btn { display:inline-block; padding:7px 12px; border:1px solid var(--line); border-radius:6px; color:var(--text); text-decoration:none; margin:4px 6px 0 0; }
+  .btn:hover { border-color:var(--blue); } .btn.bm { background:#1d2b44; border-color:#2f4b7a; }
+  .score { font-size:28px; font-weight:700; } .verdict li { margin:3px 0; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; } @media (max-width:800px){ .grid2 { grid-template-columns:1fr; } }
+  code { font-size:12px; } .cand { cursor:pointer; color:var(--blue); }
   a.sym { color:var(--text); text-decoration:none; font-weight:600; } a.sym:hover { color:var(--blue); }
 </style>
 </head>
@@ -69,6 +78,7 @@
     and biggest-volume perps only. Data: MEXC public futures API.
   </div>
 </main>
+<div class="modal" id="modal" onclick="if(event.target.id==='modal')this.classList.remove('on')"><div class="box" id="mbox"></div></div>
 <script>
 const $ = s => document.querySelector(s);
 const usd = v => v == null ? '–' : v >= 1e9 ? '$' + (v / 1e9).toFixed(2) + 'B' : v >= 1e6 ? '$' + (v / 1e6).toFixed(2) + 'M' : v >= 1e3 ? '$' + (v / 1e3).toFixed(0) + 'k' : '$' + v.toFixed(0);
@@ -94,7 +104,7 @@ async function load() {
       ['Flagged thin / wide / low vol', `${d.rows.length - ok.length} of ${d.rows.length}`],
     ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
     $('#out').innerHTML = `<table><tr><th>Perp</th><th>Price</th><th>24h</th><th>1h</th><th>24h vol</th><th>Vol spike</th>
-      <th>Open interest</th><th>Funding</th><th>Spread</th><th>Book ±${d.cfg.depth_pct}%</th><th>Fill 1% buy / sell</th><th>Flags</th></tr>` +
+      <th>Open interest</th><th>Funding</th><th>Spread</th><th>Book ±${d.cfg.depth_pct}%</th><th>Fill 1% buy / sell</th><th>Flags</th><th></th></tr>` +
       rows.map(x => `<tr class="${x.flags.includes('THIN') ? 'thin' : ''}">
         <td><a class="sym" target="_blank" href="https://futures.mexc.com/exchange/${x.symbol}">${x.base}</a>${x.meme ? '<span class="meme">meme</span>' : ''}</td>
         <td>${price(x.price)}</td><td>${pct(x.chg_24h)}</td><td>${pct(x.chg_1h)}</td><td>${usd(x.vol_24h)}</td>
@@ -103,9 +113,47 @@ async function load() {
         <td>${x.spread_pct == null ? '–' : `<span class="${x.spread_pct > d.cfg.wide_pct ? 'neg' : ''}">${x.spread_pct.toFixed(2)}%</span>`}</td>
         <td>${x.book_error ? '<span class="dim" title="' + x.book_error + '">n/a</span>' : usd(x.depth_usd)}</td>
         <td>${usd(x.ask_1pct)} / ${usd(x.bid_1pct)}</td>
-        <td>${x.flags.length ? x.flags.map(f => `<span class="flag ${f}">${f}</span>`).join('') : '<span class="flag OK">OK</span>'}</td></tr>`).join('') +
+        <td>${x.flags.length ? x.flags.map(f => `<span class="flag ${f}">${f}</span>`).join('') : '<span class="flag OK">OK</span>'}</td>
+        <td><button onclick="onchain('${x.symbol}')" title="Bubblemaps + wallet forensics">🔍 Wallets</button></td></tr>`).join('') +
       `</table><div class="note">${d.rows.length} shown of ${d.scanned} USDT perps scanned · updated ${new Date(d.ts * 1000).toLocaleTimeString()}</div>`;
   } catch (e) { $('#out').innerHTML = `<div class="err">Error: ${e.message}</div>`; }
+}
+const short = w => w ? w.slice(0, 6) + '…' + w.slice(-4) : '';
+const wal = x => `<a href="${x.url || '#'}" target="_blank"><code>${short(x.wallet)}</code></a> <span class="dim" style="cursor:pointer" title="copy" onclick="navigator.clipboard && navigator.clipboard.writeText('${x.wallet}')">⧉</span>`;
+const wtable = (list, cols) => list && list.length ? '<table>' + list.map(x => `<tr><td>${wal(x)}${x.bot ? ` <span class="flag WIDE">${x.bot}</span>` : ''}</td>${cols(x)}</tr>`).join('') + '</table>' : '<div class="dim">none</div>';
+const NETS = ['solana', 'ethereum', 'bsc', 'base', 'arbitrum', 'polygon', 'avalanche', 'sonic', 'optimism', 'robinhood', 'hyperevm', 'tron', 'ton'];
+async function onchain(symbol, chain, address) {
+  $('#modal').classList.add('on');
+  $('#mbox').innerHTML = `<h2>${symbol.replace('_USDT', '')} - on-chain wallets</h2><div class="dim">Finding the token and pulling its pool trades… (up to ~20s)</div>`;
+  const q = new URLSearchParams({symbol}); if (chain) q.set('chain', chain); if (address) q.set('address', address);
+  let d;
+  try { d = await (await fetch('/api/perps/onchain?' + q)).json(); } catch (e) { d = {error: e.message}; }
+  const t = d.token || {};
+  const cands = (d.candidates || []).map(c => `<span class="cand" onclick="onchain('${symbol}','${c.chain}','${c.address}')">${c.chain} ${short(c.address)} · ${c.name || ''} · liq ${usd(c.liq)}</span>`).join(' &nbsp;|&nbsp; ');
+  const override = `<div class="controls" style="margin-top:10px">Wrong coin? <select id="oc-chain">${NETS.map(n => `<option ${n === t.chain ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    <input id="oc-addr" placeholder="paste contract address" style="width:340px"><button onclick="onchain('${symbol}', $('#oc-chain').value, $('#oc-addr').value)">Analyse</button></div>`;
+  let h = `<h2>${symbol.replace('_USDT', '')} - on-chain wallets <span class="dim" style="font-size:13px">${t.name || ''} · ${t.chain || ''} <code>${t.address || ''}</code></span></h2>`;
+  h += `<div>${d.bubblemaps ? `<a class="btn bm" target="_blank" href="${d.bubblemaps}">🫧 Open Bubblemaps</a>` : ''}${d.dexscreener ? `<a class="btn" target="_blank" href="${d.dexscreener}">DexScreener</a>` : ''}<a class="btn" target="_blank" href="https://futures.mexc.com/exchange/${symbol}">MEXC perp</a></div>`;
+  if (cands) h += `<div class="note">Matched on symbol - other tokens with the same ticker: ${cands}</div>`;
+  if (d.error) { $('#mbox').innerHTML = h + `<div class="err">${d.error}</div>` + override; return; }
+  const sc = d.manipulation || 0;
+  h += `<div class="grid2" style="margin-top:12px"><div><div class="dim">Manipulation score</div><div class="score ${sc >= 60 ? 'neg' : sc >= 30 ? '' : 'pos'}">${sc}/100</div>
+        <div class="dim" style="font-size:12px">${Object.entries(d.manipulation_parts || {}).map(([k, v]) => `${k} +${v}`).join(' · ') || 'nothing flagged'}</div></div>
+        <div><ul class="verdict">${(d.verdict || []).map(v => `<li>${v}</li>`).join('')}</ul></div></div>`;
+  h += `<div class="tiles" style="margin-top:10px">${[['Bot volume', d.bot_pct], ['Wash trading', d.wash_pct], ['Top wallet share', d.top_wallet_pct]].map(([k, v]) =>
+        `<div class="tile"><div class="k">${k}</div><div class="v ${v > 40 ? 'neg' : ''}">${v == null ? '–' : v.toFixed(0) + '%'}</div></div>`).join('')}
+        <div class="tile"><div class="k">Spikes found</div><div class="v">${d.spike_count || 0}</div></div></div>`;
+  h += `<h3>🎯 Insiders / operators - bought in the hour before the spike AND sold into it</h3>` +
+       wtable(d.insiders, x => `<td>${x.usd == null ? '' : 'bought ' + usd(x.usd)}</td><td class="neg">${x.sold_into ? 'sold ' + usd(x.sold_into) + ' into it' : ''}</td>`);
+  h += `<div class="grid2"><div><h3>⏳ Loaded in the hour before the spike</h3>` +
+       wtable(d.pre_buyers, x => `<td>${usd(x.usd)}</td>`) + `</div><div><h3>💸 Sold into the spike</h3>` +
+       wtable(d.sold_into, x => `<td>${usd(x.usd)}</td>`) + `</div></div>`;
+  h += `<div class="grid2"><div><h3>🤖 Bots (known or ${'20+'} trades in the window)</h3>` +
+       wtable(d.bots, x => `<td>${x.trades} trades</td><td>${usd(x.usd)}</td>`) + `</div><div><h3>🐋 Biggest wallets by volume (wash check)</h3>` +
+       wtable(d.top_wallets, x => `<td>${x.trades} trades</td><td>${usd(x.usd)}</td>`) + `</div></div>`;
+  const win = d.window ? `${new Date(d.window[0] * 1000).toLocaleString()} → ${new Date(d.window[1] * 1000).toLocaleString()}` : '';
+  h += `<div class="note">From the biggest pool's last ${d.trades_seen || 0} trades (${win}) and ~6h of 1-minute candles (GeckoTerminal) - older spikes and wallets won't show. A perp can also move on MEXC with nothing happening on-chain. Open Bubblemaps to see how these wallets connect.</div>` + override;
+  $('#mbox').innerHTML = h;
 }
 function schedule() { clearInterval(timer); if ($('#auto').checked) timer = setInterval(load, 60000); }
 ['memes', 'sort', 'hidethin'].forEach(id => $('#' + id).addEventListener('change', load));

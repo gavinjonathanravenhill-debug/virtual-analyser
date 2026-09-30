@@ -202,3 +202,15 @@ def perps_scan():
         return jsonify({"error": f"MEXC request failed: {e}"}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@perps_bp.route("/api/perps/onchain")
+def perps_onchain():
+    try:
+        import perps_onchain as po
+        a = request.args
+        return jsonify(po.onchain(a.get("symbol", ""), a.get("chain") or None, (a.get("address") or "").strip() or None))
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Lookup failed: {e}"}), 502
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
