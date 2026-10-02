@@ -128,6 +128,11 @@ try:
     app.register_blueprint(perps_bp)
 except Exception as _e:
     print(f"perps scanner failed to load, continuing: {_e}")
+try:
+    import listings
+    listings.start()     # listings radar: exchange announcements + new markets -> Telegram
+except Exception as _e:
+    print(f"listings radar failed to start, continuing: {_e}")
 
 
 @app.route("/healthz")

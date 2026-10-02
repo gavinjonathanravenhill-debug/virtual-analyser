@@ -214,3 +214,53 @@ def perps_onchain():
         return jsonify({"error": f"Lookup failed: {e}"}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------- listings radar ----
+@perps_bp.route("/listings")
+def listings_page():
+    return render_template("listings.html")
+
+
+@perps_bp.route("/api/listings")
+def listings_feed():
+    import listings
+    try:
+        return jsonify(listings.feed(hours=float(request.args.get("hours") or 72)))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@perps_bp.route("/api/listings/scan", methods=["POST"])
+def listings_scan():
+    import listings
+    try:
+        new = listings.scan()
+        listings.enrich_missing(6)
+        return jsonify({"new": len(new)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@perps_bp.route("/api/listings/watch", methods=["POST"])
+def listings_watch_add():
+    import listings
+    d = request.get_json(silent=True) or {}
+    if not (d.get("name") or d.get("ticker")):
+        return jsonify({"error": "name or ticker needed"}), 400
+    listings.watch_add(d)
+    return jsonify({"ok": True})
+
+
+@perps_bp.route("/api/listings/watch/<int:wid>", methods=["DELETE"])
+def listings_watch_remove(wid):
+    import listings
+    return jsonify({"removed": listings.watch_remove(wid)})
+
+
+@perps_bp.route("/api/listings/settings", methods=["POST"])
+def listings_settings():
+    import edge
+    d = request.get_json(silent=True) or {}
+    edge.save_settings({k: v for k, v in d.items() if k in ("lst_alerts", "lst_quiet_markets")})
+    return jsonify({"ok": True})
