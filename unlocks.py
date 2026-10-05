@@ -31,11 +31,11 @@ edge._set_cache[1] = None
 
 # name, ticker, date (UTC, YYYY-MM-DD or YYYY-MM-DDTHH:MM), tokens, % of supply, allocation, note
 SEED = [
-    ("Ethena", "ENA", "2026-10-05", 171.88e6, 1.88, "", "~$41.5M"),
+    ("Ethena", "ENA", "2026-10-05", 171.88e6, None, "", ""),
     ("Hyperliquid", "HYPE", "2026-10-06", 3.75e6, None, "",
-     "~$340M - reportedly all going to one institutional buyer, so may not hit the market"),
+     "Reportedly all going to one institutional buyer, so may not hit the market"),
     ("Ethos Network", "", "2026-10-08", None, None, "", "Token unlock 8 Oct (size TBC)"),
-    ("Aptos", "APT", "2026-10-11", 11.31e6, 0.64, "", "~$9M"),
+    ("Aptos", "APT", "2026-10-11", 11.31e6, None, "", ""),
     ("Aerodrome", "AERO", "", None, None, "", "Unlock week of 5-11 Oct, date TBC"),
     ("Movement", "MOVE", "", None, None, "", "Unlock week of 5-11 Oct, date TBC"),
     ("Babylon", "BABY", "", None, None, "", "Unlock week of 5-11 Oct, date TBC"),
@@ -141,15 +141,21 @@ def enrich(horizon_days=21):
     except Exception as e:
         perps = {}
         _status["errors"]["mexc"] = str(e)[:120]
-    for t in ticks:
+    limited = False
+    # soonest unlocks first, so if CoinGecko rate-limits us the ones that matter most are already filled
+    for t in sorted(ticks, key=lambda x: (_info.get(x) or {}).get("t", 0)):
         cur = _info.get(t) or {}
         cg = cur.get("cg")
-        if not cg or now - cur.get("t", 0) > 3600:
+        if not limited and (not cg or not cg.get("found") or now - cur.get("t", 0) > 3600):
             try:
                 cg = listings.token_info(t)
+                _status["errors"].pop("coingecko", None)
             except Exception as e:
+                if "rate limit" in str(e) or "429" in str(e):
+                    limited = True        # free tier: stop for this pass, carry on next loop (10 min)
+                    _status["errors"]["coingecko"] = "rate limited - remaining coins fill in on the next pass"
                 cg = cg or {"ticker": t, "found": False, "error": str(e)[:80]}
-            time.sleep(1.5)       # stay under the free CoinGecko rate limit
+            time.sleep(2.5)       # free CoinGecko tier is ~5-10 calls/min and the listings radar shares it
         _info[t] = {"cg": cg, "perp": perps.get(t), "t": now if cg and cg.get("found") else cur.get("t", 0)}
     _status["last_enrich"] = int(now)
 
