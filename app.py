@@ -246,6 +246,36 @@ def _get_oil_price():
         return candles[-1]["c"]
     return 0
 
+_us10y_cache = {"time": 0, "data": None}
+def _get_us10y():
+    """US 10-year Treasury yield (^TNX) 1-min candles from Yahoo, cached 60s."""
+    import time as _t
+    now = _t.time()
+    if _us10y_cache["data"] and (now - _us10y_cache["time"]) < 60:
+        return _us10y_cache["data"]
+    try:
+        r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/%5ETNX",
+                         params={"interval": "1m", "range": "1d"},
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        res = r.json()["chart"]["result"][0]
+        meta = res.get("meta", {})
+        ts = res.get("timestamp") or []
+        closes = (res.get("indicators", {}).get("quote") or [{}])[0].get("close") or []
+        fix = lambda v: v / 10 if v and v > 20 else v   # old Yahoo quoted ^TNX x10
+        candles = [{"t": int(ts[i]) * 1000, "c": round(fix(float(closes[i])), 4)}
+                   for i in range(min(len(ts), len(closes))) if closes[i] is not None][-60:]
+        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+        last = candles[-1]["c"] if candles else fix(meta.get("regularMarketPrice"))
+        data = {"candles": candles, "symbol": "US10Y",
+                "last": last, "prev_close": fix(prev) if prev else None,
+                "change_bp": round((last - fix(prev)) * 100, 1) if (last and prev) else None,
+                "live": bool(candles) and (now * 1000 - candles[-1]["t"]) < 10 * 60 * 1000}
+        if candles:
+            _us10y_cache.update(time=now, data=data)
+        return data
+    except Exception:
+        return _us10y_cache["data"] or {"candles": [], "symbol": "US10Y", "error": "yield feed unavailable"}
+
 @app.route("/api/mm-check")
 def mm_check():
     address = request.args.get("address", "").strip()
@@ -265,6 +295,8 @@ def candles():
         symbol = request.args.get("symbol", "BTCUSDT")
         if symbol.upper() in ("CL=F", "OIL", "BRENT", "WTI"):
             return jsonify({"candles": _get_oil_candles(), "symbol": "OIL"})
+        if symbol.upper() in ("US10Y", "^TNX", "TNX"):
+            return jsonify(_get_us10y())
         r = requests.get(
             "https://api.mexc.com/api/v3/klines",
             params={"symbol": symbol, "interval": "1m", "limit": 60},

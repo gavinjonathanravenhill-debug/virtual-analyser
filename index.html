@@ -17,7 +17,7 @@ header{display:flex;align-items:flex-start;justify-content:space-between;margin-
 .live-badge{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--accent);background:rgba(127,255,110,.06);border:1px solid rgba(127,255,110,.2);padding:8px 14px;border-radius:4px;align-self:flex-start}
 .live-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse 1.5s ease infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.price-panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:18px;display:grid;grid-template-columns:160px 200px 1fr;gap:24px;align-items:center}
+.price-panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:18px;display:grid;grid-template-columns:160px 200px 200px 1fr;gap:24px;align-items:center}
 @media(max-width:700px){.price-panel{grid-template-columns:1fr 1fr}}
 .plabel{font-family:var(--mono);font-size:10px;letter-spacing:3px;color:var(--muted);margin-bottom:6px;text-transform:uppercase}
 .pval{font-size:26px;font-weight:800;line-height:1}
@@ -138,6 +138,11 @@ input:focus{border-color:var(--accent)}
     <div class="pval" id="virt-price" style="color:var(--accent)">—</div>
     <div class="psub">CORRELATION: <span id="corr-val" style="font-weight:700">—</span> <span id="corr-label" style="font-size:9px">—</span></div>
   </div>
+  <div>
+    <div class="plabel">US 10Y YIELD</div>
+    <div class="pval" id="us10y-price" style="color:#6eb4ff">—</div>
+    <div class="psub"><span id="us10y-chg">—</span> · BTC CORR: <span id="us10y-corr" style="font-weight:700">—</span></div>
+  </div>
   <div class="corr-box">
     <div class="corr-header">
       <span class="corr-title">1-MIN CHART · 60 CANDLES</span>
@@ -147,6 +152,7 @@ input:focus{border-color:var(--accent)}
       <div class="corr-legend">
         <span style="color:#f7931a">■ BTC</span>
         <span style="color:var(--accent)">■ OIL</span>
+        <span style="color:#6eb4ff">■ US10Y</span>
       </div>
     </div>
   </div>
@@ -225,7 +231,7 @@ input:focus{border-color:var(--accent)}
 <script>
 // ── State ─────────────────────────────────────────────────
 let chain = 'base';
-const priceState = { btcCandles: [], oilCandles: [], interval: null };
+const priceState = { btcCandles: [], oilCandles: [], us10y: null, interval: null };
 
 // ── Chain buttons ─────────────────────────────────────────
 document.querySelectorAll('.cb').forEach(b => b.addEventListener('click', () => {
@@ -279,16 +285,33 @@ async function fetchPrices() {
 
 async function fetchCandles() {
   try {
-    const [btcR, oilR] = await Promise.all([
+    const [btcR, oilR, yR] = await Promise.all([
       fetch('/api/candles?symbol=BTCUSDT').then(r => r.json()),
-      fetch('/api/candles?symbol=CL=F').then(r => r.json())
+      fetch('/api/candles?symbol=CL=F').then(r => r.json()),
+      fetch('/api/candles?symbol=US10Y').then(r => r.json()).catch(() => null)
     ]);
+    if (yR) { priceState.us10y = yR; renderUs10y(); }
     if (btcR.candles && oilR.candles) {
       priceState.btcCandles = btcR.candles;
       priceState.oilCandles = oilR.candles;
       drawCorrelation();
     }
   } catch(e) { console.log('candle error', e); }
+}
+
+function renderUs10y() {
+  const y = priceState.us10y;
+  const pEl = document.getElementById('us10y-price');
+  const cEl = document.getElementById('us10y-chg');
+  if (!y || !y.candles || !y.candles.length) { cEl.textContent = 'feed unavailable'; return; }
+  pEl.textContent = Number(y.last).toFixed(3) + '%';
+  if (y.change_bp !== null && y.change_bp !== undefined) {
+    const bp = y.change_bp;
+    cEl.textContent = (bp > 0 ? '+' : '') + bp.toFixed(1) + ' bp' + (y.live ? '' : ' · CLOSED');
+    cEl.style.color = bp > 0 ? '#ff4d6e' : bp < 0 ? '#7fff6e' : '';   // rising yields = risk-off
+  } else {
+    cEl.textContent = y.live ? 'live' : 'CLOSED';
+  }
 }
 
 function pearson(a, b) {
@@ -335,6 +358,22 @@ function drawCorrelation() {
   ctx.beginPath(); ctx.strokeStyle = '#7fff6e'; ctx.lineWidth = 2;
   oilN.forEach((v,i) => { const x=W*i/(n-1), y=H*0.1+H*0.8*(1-v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
   ctx.stroke();
+  // US 10Y yield (its own 60 one-min points; flat/stale outside US trading hours)
+  const yc = (priceState.us10y && priceState.us10y.candles || []).map(c => c.c);
+  const yCorrEl = document.getElementById('us10y-corr');
+  if (yc.length >= 2) {
+    const yN = normalise(yc);
+    ctx.beginPath(); ctx.strokeStyle = '#6eb4ff'; ctx.lineWidth = 2;
+    if (!priceState.us10y.live) ctx.setLineDash([4, 3]);
+    yN.forEach((v,i) => { const x=W*i/(yN.length-1), y=H*0.1+H*0.8*(1-v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.stroke(); ctx.setLineDash([]);
+    if (priceState.us10y.live) {
+      const m = Math.min(btcC.length, yc.length);
+      const yCorr = pearson(btcC.slice(-m), yc.slice(-m));
+      yCorrEl.textContent = yCorr.toFixed(2);
+      yCorrEl.style.color = yCorr < -0.3 ? '#ff4d6e' : yCorr > 0.3 ? '#7fff6e' : '#5a6480';
+    } else { yCorrEl.textContent = '—'; yCorrEl.style.color = ''; }
+  }
   const col = corr > 0.7 ? '#7fff6e' : corr > 0.3 ? '#ffb84d' : corr < -0.3 ? '#ff4d6e' : '#5a6480';
   document.getElementById('corr-val').textContent = corr.toFixed(3);
   document.getElementById('corr-val').style.color = col;
