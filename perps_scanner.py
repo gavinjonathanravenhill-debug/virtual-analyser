@@ -264,3 +264,50 @@ def listings_settings():
     d = request.get_json(silent=True) or {}
     edge.save_settings({k: v for k, v in d.items() if k in ("lst_alerts", "lst_quiet_markets")})
     return jsonify({"ok": True})
+
+
+# ------------------------------------------------------------- token unlocks ----
+@perps_bp.route("/api/unlocks")
+def unlocks_feed():
+    import unlocks
+    try:
+        return jsonify(unlocks.feed(days=float(request.args.get("days") or 30)))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@perps_bp.route("/api/unlocks/refresh", methods=["POST"])
+def unlocks_refresh():
+    import unlocks
+    try:
+        unlocks.refresh(force_sync=True)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@perps_bp.route("/api/unlocks", methods=["POST"])
+def unlocks_add():
+    import unlocks
+    d = request.get_json(silent=True) or {}
+    if not (d.get("name") or d.get("ticker")):
+        return jsonify({"error": "name or ticker needed"}), 400
+    try:
+        unlocks.add(d)
+    except ValueError:
+        return jsonify({"error": "amount / % must be numbers (e.g. 171.88M)"}), 400
+    return jsonify({"ok": True})
+
+
+@perps_bp.route("/api/unlocks/<int:uid>", methods=["DELETE"])
+def unlocks_remove(uid):
+    import unlocks
+    return jsonify({"removed": unlocks.remove(uid)})
+
+
+@perps_bp.route("/api/unlocks/settings", methods=["POST"])
+def unlocks_settings():
+    import edge
+    d = request.get_json(silent=True) or {}
+    edge.save_settings({k: v for k, v in d.items() if k == "unl_alerts"})
+    return jsonify({"ok": True})

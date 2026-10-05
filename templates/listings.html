@@ -34,12 +34,16 @@
   a { color:var(--blue); text-decoration:none; } .lk a { margin-right:8px; font-size:12px; }
   .note { color:var(--dim); font-size:12px; margin:10px 0 0; } .err { color:var(--red); font-size:12px; }
   .hit { color:var(--green); font-weight:600; }
+  .imp { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; font-weight:700; }
+  .imp-HIGH { background:#4a1717; color:var(--red); } .imp-MED { background:#3a3212; color:var(--amber); }
+  .imp-LOW { background:#123a24; color:var(--green); } .imp-\? { background:#1d2b44; color:var(--dim); }
+  .soon td { background:rgba(255,92,92,.06); } .past td { opacity:.5; }
 </style>
 </head>
 <body>
 <header>
   <h1>🛰 Listings Radar</h1>
-  <a href="/">Macro</a> <a href="/perps">Perps</a> <a href="/crypto-movers">Movers</a> <a href="/solana">Wallets</a>
+  <a href="/">Macro</a> <a href="/perps">Perps</a> <a href="/crypto-movers">Movers</a> <a href="/solana">Wallets</a> <a href="#unlocks">🔓 Unlocks</a>
   <div class="controls" style="margin-left:auto">
     <select id="src"><option value="">All exchanges</option></select>
     <select id="typ"><option value="">All types</option><option>spot</option><option>perp</option><option>alpha</option>
@@ -51,6 +55,21 @@
 <main>
   <div class="tiles" id="tiles"></div>
   <div class="card"><h3>New listings & markets</h3><div id="feed" class="dim">Loading…</div></div>
+  <div class="card" id="unlocks"><h3>🔓 Token unlocks - next 30 days <span class="dim" style="font-weight:400;font-size:12px" id="u-src"></span></h3>
+    <div id="u-tiles" class="tiles" style="margin-bottom:10px"></div>
+    <div id="u-table" class="dim">Loading…</div>
+    <div class="controls" style="margin-top:10px">
+      <input id="u-name" placeholder="Project" style="width:130px"><input id="u-ticker" placeholder="Ticker" style="width:80px">
+      <input id="u-date" placeholder="UTC date 2026-10-12 or 2026-10-12T14:00" style="width:230px">
+      <input id="u-amount" placeholder="Tokens e.g. 171.88M" style="width:140px"><input id="u-pct_supply" placeholder="% supply" style="width:80px">
+      <input id="u-alloc" placeholder="Who (team / investors…)" style="width:160px"><input id="u-note" placeholder="Note" style="flex:1;min-width:150px">
+      <button onclick="addUnlock()">+ Add</button> <button onclick="refreshUnlocks(this)">↻ Refresh prices</button>
+    </div>
+    <label class="note" style="display:block"><input type="checkbox" id="s-ua" style="width:auto"> Telegram alert 24h and 1h before MED/HIGH impact unlocks (group "Unlocks")</label>
+    <div class="note"><b>Impact</b> = unlock value ÷ market cap: <span class="imp imp-HIGH">HIGH</span> ≥ 2%, <span class="imp imp-MED">MED</span> ≥ 0.5%.
+      Big team/investor cliffs often get front-run: price tends to drift down into the date and can bounce once it's out. Check the perp funding - if it's already deeply negative, the short is crowded.
+      Value uses the live price × tokens unlocking. <span id="u-err" class="err"></span></div>
+  </div>
   <div class="card"><h3>📌 Watchlist - upcoming TGEs / listings</h3>
     <div id="watch"></div>
     <div class="controls" style="margin-top:10px">
@@ -128,6 +147,73 @@ function render() {
   $('#status').innerHTML = `Checks every ${st.seconds}s · last check ${st.last ? ago(st.last) : 'not yet'}` +
     (errs.length ? '<div class="err">' + errs.map(([k, v]) => `${k}: ${esc(v)}`).join('<br>') + '</div>' : ' · all sources OK');
 }
+// ---------------------------------------------------------------- unlocks ----
+let U = null;
+const until = ts => { if (!ts) return '<span class="dim">TBC</span>'; const h = (ts - Date.now() / 1000) / 3600;
+  return h < 0 ? `<span class="dim">${(-h).toFixed(0)}h ago</span>` : h < 48 ? `<b class="neg">in ${h.toFixed(h < 10 ? 1 : 0)}h</b>` : `in ${(h / 24).toFixed(1)}d`; };
+async function loadUnlocks() {
+  try {
+    U = await (await fetch('/api/unlocks')).json();
+    if (U.error) throw new Error(U.error);
+    renderUnlocks();
+  } catch (e) { $('#u-table').innerHTML = `<div class="err">Error: ${e.message}</div>`; }
+}
+function renderUnlocks() {
+  const now = Date.now() / 1000, rows = U.rows;
+  const wk = rows.filter(r => r.ts && r.ts > now && r.ts < now + 7 * 86400);
+  const tot = wk.reduce((s, r) => s + (r.value || 0), 0);
+  const big = rows.filter(r => r.ts > now && r.impact === 'HIGH');
+  const next = rows.find(r => r.ts && r.ts > now);
+  $('#u-tiles').innerHTML = [
+    ['Unlocking next 7 days', usd(tot) + ` <span class="dim" style="font-size:12px">${wk.length} tokens</span>`],
+    ['HIGH impact coming', big.length ? big.map(r => r.ticker || r.name).join(', ') : '0'],
+    ['Next', next ? `${esc(next.ticker || next.name)} <span class="dim" style="font-size:12px">${until(next.ts)}</span>` : '–'],
+  ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  $('#u-src').textContent = U.status.tokenomist ? `· Tokenomist synced ${U.status.last_sync ? ago(U.status.last_sync) : 'pending'} + manual`
+    : '· manual list (set TOKENOMIST_API_KEY on Railway for automatic data)';
+  const errs = Object.entries(U.status.errors || {});
+  $('#u-err').textContent = errs.map(([k, v]) => `${k}: ${v}`).join(' · ');
+  $('#s-ua').checked = !!U.settings.unl_alerts;
+  $('#u-table').innerHTML = rows.length ? `<table><tr><th class="l">When (UK)</th><th class="l">Token</th><th>Tokens</th><th>Value</th>
+      <th>% mcap</th><th>% supply</th><th class="l">Impact</th><th>Price</th><th>24h</th><th>Float</th>
+      <th>Perp funding</th><th>Perp OI</th><th class="l">Who / note</th><th class="l">Links</th><th></th></tr>` +
+    rows.map(r => {
+      const p = r.perp, t = r.ticker;
+      const when = r.ts ? new Date(r.ts * 1000).toLocaleString('en-GB', {weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London'}) : '';
+      const cls = r.ts && r.ts < now ? 'past' : r.ts && r.ts - now < 86400 ? 'soon' : '';
+      const lk = [r.cg_url && ['CoinGecko', r.cg_url], p && ['MEXC perp', `https://futures.mexc.com/exchange/${p.symbol}`],
+                  r.url && ['Source', r.url], t && ['Tokenomist', `https://tokenomist.ai/?search=${t}`]].filter(Boolean);
+      return `<tr class="${cls}"><td class="l">${when}<div>${until(r.ts)}</div></td>
+        <td class="l"><b>${esc(t)}</b> ${esc(r.name)}${r.cg_name && r.cg_name !== r.name ? `<div class="dim" style="font-size:12px">${esc(r.cg_name)}</div>` : ''}</td>
+        <td>${r.amount ? usd(r.amount).slice(1) : '–'}</td><td>${usd(r.value)}</td>
+        <td>${r.pct_mcap == null ? '–' : r.pct_mcap.toFixed(2) + '%'}</td><td>${r.pct_supply == null ? '–' : r.pct_supply.toFixed(2) + '%'}</td>
+        <td class="l"><span class="imp imp-${r.impact}">${r.impact}</span></td>
+        <td>${price(r.price)}</td><td>${pct(r.chg_24h)}</td>
+        <td>${r.float_pct == null ? '–' : r.float_pct.toFixed(0) + '%'}</td>
+        <td>${p ? `<span class="${p.funding_pct < 0 ? 'neg' : 'pos'}">${p.funding_pct.toFixed(4)}%</span>` : '<span class="dim">no perp</span>'}</td>
+        <td>${p ? usd(p.oi_usd) : '–'}</td>
+        <td class="l dim" style="max-width:260px">${esc([r.alloc, r.note].filter(Boolean).join(' · '))}</td>
+        <td class="l lk">${lk.map(([n, u]) => `<a href="${esc(u)}" target="_blank">${n}</a>`).join('')}</td>
+        <td>${r.source === 'manual' ? `<button onclick="delUnlock(${r.id})" title="remove">✕</button>` : ''}</td></tr>`;
+    }).join('') + '</table>' : '<div class="dim">No unlocks in the next 30 days. Add one below.</div>';
+}
+async function addUnlock() {
+  const ks = ['name', 'ticker', 'date', 'amount', 'pct_supply', 'alloc', 'note'], body = {};
+  for (const k of ks) body[k] = $('#u-' + k).value;
+  const r = await fetch('/api/unlocks', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json();
+  if (d.error) { $('#u-err').textContent = d.error; return; }
+  for (const k of ks) $('#u-' + k).value = '';
+  loadUnlocks();
+}
+async function delUnlock(id) { await fetch('/api/unlocks/' + id, {method: 'DELETE'}); loadUnlocks(); }
+async function refreshUnlocks(b) { b.disabled = true; b.textContent = 'Refreshing…';
+  try { await fetch('/api/unlocks/refresh', {method: 'POST'}); } catch (e) {}
+  await loadUnlocks(); b.disabled = false; b.textContent = '↻ Refresh prices'; }
+$('#s-ua').addEventListener('change', () => fetch('/api/unlocks/settings', {method: 'POST',
+  headers: {'Content-Type': 'application/json'}, body: JSON.stringify({unl_alerts: $('#s-ua').checked})}));
+loadUnlocks(); setInterval(loadUnlocks, 120000);
+
 async function scanNow(b) { b.disabled = true; b.textContent = 'Checking…';
   try { const d = await (await fetch('/api/listings/scan', {method: 'POST'})).json(); b.textContent = d.error ? 'Error' : `${d.new} new`; } catch (e) { b.textContent = 'Error'; }
   await load(); setTimeout(() => { b.disabled = false; b.textContent = '↻ Check now'; }, 2000); }

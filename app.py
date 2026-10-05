@@ -133,6 +133,11 @@ try:
     listings.start()     # listings radar: exchange announcements + new markets -> Telegram
 except Exception as _e:
     print(f"listings radar failed to start, continuing: {_e}")
+try:
+    import unlocks
+    unlocks.start()      # token unlocks: Tokenomist sync + manual list, CoinGecko/MEXC enrichment, Telegram 24h/1h
+except Exception as _e:
+    print(f"token unlocks failed to start, continuing: {_e}")
 
 
 @app.route("/healthz")
