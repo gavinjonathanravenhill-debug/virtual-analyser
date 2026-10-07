@@ -50,6 +50,8 @@ from xfeed import init_xfeed
 init_xfeed(app, auth=requires_auth)
 from reorder import init_reorder
 init_reorder(app)
+from oil_intel import init_oil_intel, get_brent_candles, get_brent_price
+init_oil_intel(app, requires_auth)
 
 
 # ---- Wintermute tracker (/wintermute) - whole blueprint behind the site password ----
@@ -224,7 +226,7 @@ ALPHAVANTAGE_API_KEY = os.environ.get("ALPHAVANTAGE_API_KEY", "RV30880XPRJM0RHA"
 def prices():
     try:
         btc = requests.get("https://api.mexc.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
-        return jsonify({"btc": float(btc.get("price", 0)), "oil": _get_oil_price(), "oil_name": "WTI Crude (USD/bbl)"})
+        return jsonify({"btc": float(btc.get("price", 0)), "oil": _get_oil_price(), "oil_name": "WTI Crude (USD/bbl)", "brent": get_brent_price()})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -300,7 +302,9 @@ def mm_check():
 def candles():
     try:
         symbol = request.args.get("symbol", "BTCUSDT")
-        if symbol.upper() in ("CL=F", "OIL", "BRENT", "WTI"):
+        if symbol.upper() in ("BRENT", "UKOIL", "BZ=F"):
+            return jsonify({"candles": get_brent_candles(), "symbol": "BRENT"})
+        if symbol.upper() in ("CL=F", "OIL", "WTI"):
             return jsonify({"candles": _get_oil_candles(), "symbol": "OIL"})
         if symbol.upper() in ("US10Y", "^TNX", "TNX"):
             return jsonify(_get_us10y())

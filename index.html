@@ -17,7 +17,12 @@ header{display:flex;align-items:flex-start;justify-content:space-between;margin-
 .live-badge{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--accent);background:rgba(127,255,110,.06);border:1px solid rgba(127,255,110,.2);padding:8px 14px;border-radius:4px;align-self:flex-start}
 .live-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse 1.5s ease infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.price-panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:18px;display:grid;grid-template-columns:160px 200px 200px 1fr;gap:24px;align-items:center}
+.price-panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:18px;display:grid;grid-template-columns:140px 170px 170px 170px 1fr;gap:22px;align-items:center}
+@media(max-width:1100px){.price-panel{grid-template-columns:repeat(4,1fr)}.price-panel .corr-box{grid-column:1/-1}}
+.oil-g{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}@media(max-width:900px){.oil-g{grid-template-columns:1fr 1fr}}
+.oil-news{list-style:none;margin:0;padding:0;max-height:330px;overflow-y:auto}.oil-news li{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.4}
+.oil-news li:last-child{border-bottom:0}.oil-news .nt{font-family:var(--mono);font-size:10px;color:var(--muted);min-width:54px;padding-top:2px}.oil-news a{color:var(--text);text-decoration:none}.oil-news a:hover{color:var(--accent)}.oil-news .ns{font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:6px}
+.oil-news li.fresh .nt{color:var(--accent)}
 @media(max-width:700px){.price-panel{grid-template-columns:1fr 1fr}}
 .plabel{font-family:var(--mono);font-size:10px;letter-spacing:3px;color:var(--muted);margin-bottom:6px;text-transform:uppercase}
 .pval{font-size:26px;font-weight:800;line-height:1}
@@ -139,6 +144,11 @@ input:focus{border-color:var(--accent)}
     <div class="psub">CORRELATION: <span id="corr-val" style="font-weight:700">—</span> <span id="corr-label" style="font-size:9px">—</span></div>
   </div>
   <div>
+    <div class="plabel">BRENT</div>
+    <div class="pval" id="brent-price" style="color:#c792ff">—</div>
+    <div class="psub">BRENT−WTI: <span id="brent-spread" style="font-weight:700">—</span></div>
+  </div>
+  <div>
     <div class="plabel">US 10Y YIELD</div>
     <div class="pval" id="us10y-price" style="color:#6eb4ff">—</div>
     <div class="psub"><span id="us10y-chg">—</span> · BTC CORR: <span id="us10y-corr" style="font-weight:700">—</span></div>
@@ -151,11 +161,32 @@ input:focus{border-color:var(--accent)}
     <div class="corr-footer">
       <div class="corr-legend">
         <span style="color:#f7931a">■ BTC</span>
-        <span style="color:var(--accent)">■ OIL</span>
+        <span style="color:var(--accent)">■ WTI</span>
+        <span style="color:#c792ff">■ BRENT</span>
         <span style="color:#6eb4ff">■ US10Y</span>
       </div>
     </div>
   </div>
+</div>
+
+<!-- Oil: who is positioned (CFTC COT) -->
+<div class="card" id="oil-cot-card" style="margin-bottom:18px">
+  <div class="ct">OIL · WHO'S POSITIONED · CFTC COMMITMENTS OF TRADERS (WTI)</div>
+  <div class="oil-g">
+    <div class="stat"><div class="sl">FUNDS NET (MANAGED MONEY)</div><div class="sv" id="cot-mm">—</div><div class="ss" id="cot-mm-chg">—</div></div>
+    <div class="stat"><div class="sl">FUNDS LONG / SHORT</div><div class="sv" id="cot-ls">—</div><div class="ss" id="cot-ls-sub">—</div></div>
+    <div class="stat"><div class="sl">PRODUCERS NET</div><div class="sv" id="cot-pm">—</div><div class="ss" id="cot-pm-chg">—</div></div>
+    <div class="stat"><div class="sl">SWAP DEALERS NET</div><div class="sv" id="cot-sw">—</div><div class="ss" id="cot-sw-chg">—</div></div>
+    <div class="stat"><div class="sl">OPEN INTEREST</div><div class="sv" id="cot-oi">—</div><div class="ss" id="cot-oi-chg">—</div></div>
+  </div>
+  <canvas id="cot-canvas" style="width:100%;height:120px;display:block"></canvas>
+  <div class="ss" id="cot-note" style="margin-top:8px">Loading CFTC data…</div>
+</div>
+
+<!-- Oil news -->
+<div class="card" id="oil-news-card" style="margin-bottom:18px">
+  <div class="ct">OIL NEWS · LAST 24H <span id="oil-news-upd" style="letter-spacing:1px"></span></div>
+  <ul class="oil-news" id="oil-news"><li class="ss">Loading…</li></ul>
 </div>
 
 <!-- GammaFlip panel with chart -->
@@ -231,7 +262,7 @@ input:focus{border-color:var(--accent)}
 <script>
 // ── State ─────────────────────────────────────────────────
 let chain = 'base';
-const priceState = { btcCandles: [], oilCandles: [], us10y: null, interval: null };
+const priceState = { btcCandles: [], oilCandles: [], brentCandles: [], us10y: null, interval: null };
 
 // ── Chain buttons ─────────────────────────────────────────
 document.querySelectorAll('.cb').forEach(b => b.addEventListener('click', () => {
@@ -279,17 +310,23 @@ async function fetchPrices() {
     priceState.liveBtc = d.btc;
     redrawGamma();   // keep the gamma spot line in step with the header price
     document.getElementById('virt-price').textContent = '$' + d.oil.toFixed(2);
+    if (d.brent) {
+      document.getElementById('brent-price').textContent = '$' + d.brent.toFixed(2);
+      if (d.oil) document.getElementById('brent-spread').textContent = '$' + (d.brent - d.oil).toFixed(2);
+    }
     document.getElementById('price-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch(e) { console.log('price error', e); }
 }
 
 async function fetchCandles() {
   try {
-    const [btcR, oilR, yR] = await Promise.all([
+    const [btcR, oilR, yR, bR] = await Promise.all([
       fetch('/api/candles?symbol=BTCUSDT').then(r => r.json()),
       fetch('/api/candles?symbol=CL=F').then(r => r.json()),
-      fetch('/api/candles?symbol=US10Y').then(r => r.json()).catch(() => null)
+      fetch('/api/candles?symbol=US10Y').then(r => r.json()).catch(() => null),
+      fetch('/api/candles?symbol=BRENT').then(r => r.json()).catch(() => null)
     ]);
+    if (bR && bR.candles) priceState.brentCandles = bR.candles;
     if (yR) { priceState.us10y = yR; renderUs10y(); }
     if (btcR.candles && oilR.candles) {
       priceState.btcCandles = btcR.candles;
@@ -358,6 +395,14 @@ function drawCorrelation() {
   ctx.beginPath(); ctx.strokeStyle = '#7fff6e'; ctx.lineWidth = 2;
   oilN.forEach((v,i) => { const x=W*i/(n-1), y=H*0.1+H*0.8*(1-v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
   ctx.stroke();
+  // Brent (own 60 one-min points)
+  const bc = (priceState.brentCandles || []).map(c => c.c);
+  if (bc.length >= 2) {
+    const bN = normalise(bc);
+    ctx.beginPath(); ctx.strokeStyle = '#c792ff'; ctx.lineWidth = 1.5;
+    bN.forEach((v,i) => { const x=W*i/(bN.length-1), y=H*0.1+H*0.8*(1-v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.stroke();
+  }
   // US 10Y yield (its own 60 one-min points; flat/stale outside US trading hours)
   const yc = (priceState.us10y && priceState.us10y.candles || []).map(c => c.c);
   const yCorrEl = document.getElementById('us10y-corr');
@@ -383,7 +428,70 @@ function drawCorrelation() {
   document.getElementById('corr-label').style.color = col;
 }
 
+// ── Oil: CFTC positioning + news ─────────────────────────
+function kfmt(n) { const a = Math.abs(n); return (n < 0 ? '−' : '') + (a >= 1e6 ? (a/1e6).toFixed(2) + 'M' : a >= 1e3 ? Math.round(a/1e3) + 'k' : a); }
+function chgTxt(el, v, suffix) {
+  if (v === undefined || v === null) { el.textContent = '—'; return; }
+  el.textContent = (v > 0 ? '+' : v < 0 ? '−' : '') + kfmt(Math.abs(v)) + ' w/w' + (suffix || '');
+  el.style.color = v > 0 ? '#7fff6e' : v < 0 ? '#ff4d6e' : '';
+}
+async function fetchCot() {
+  try {
+    const d = await fetch('/api/oil/cot').then(r => r.json());
+    if (d.error || !d.weeks || !d.weeks.length) { document.getElementById('cot-note').textContent = 'CFTC feed unavailable right now.'; return; }
+    const w = d.weeks, L = w[w.length - 1];
+    const set = (id, v) => { const el = document.getElementById(id); el.textContent = kfmt(v); el.style.color = v > 0 ? '#7fff6e' : v < 0 ? '#ff4d6e' : ''; };
+    set('cot-mm', L.mm_net); chgTxt(document.getElementById('cot-mm-chg'), L.mm_net_chg);
+    set('cot-pm', L.pm_net); chgTxt(document.getElementById('cot-pm-chg'), L.pm_net_chg);
+    set('cot-sw', L.swap_net); chgTxt(document.getElementById('cot-sw-chg'), L.swap_net_chg);
+    document.getElementById('cot-oi').textContent = kfmt(L.oi); chgTxt(document.getElementById('cot-oi-chg'), L.oi_chg);
+    document.getElementById('cot-ls').textContent = L.mm_ls_ratio ? L.mm_ls_ratio + '×' : '—';
+    document.getElementById('cot-ls-sub').textContent = kfmt(L.mm_long) + ' L (' + (L.mm_long_chg >= 0 ? '+' : '−') + kfmt(Math.abs(L.mm_long_chg)) + ') · ' + kfmt(L.mm_short) + ' S (' + (L.mm_short_chg >= 0 ? '+' : '−') + kfmt(Math.abs(L.mm_short_chg)) + ')';
+    const dir = L.mm_net_chg > 0 ? 'funds ADDED to net longs' : L.mm_net_chg < 0 ? 'funds CUT net longs' : 'funds unchanged';
+    const pos = L.mm_net_pctile >= 80 ? ' — near the most bullish of the last ' + w.length + ' weeks' : L.mm_net_pctile <= 20 ? ' — near the most bearish of the last ' + w.length + ' weeks' : '';
+    document.getElementById('cot-note').textContent = 'Positions as of Tue ' + L.date + ' (published Fri). Last week ' + dir + pos + '. Bars: funds net position, ' + w.length + ' weeks.';
+    drawCot(w);
+  } catch (e) { document.getElementById('cot-note').textContent = 'CFTC feed error.'; }
+}
+function drawCot(w) {
+  const cv = document.getElementById('cot-canvas'); if (!cv) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, W, H);
+  const v = w.map(x => x.mm_net), mx = Math.max(1, ...v.map(Math.abs));
+  const mid = H / 2, bw = W / v.length;
+  ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+  ctx.font = '9px Space Mono, monospace'; ctx.textAlign = 'center';
+  v.forEach((x, i) => {
+    const h = (Math.abs(x) / mx) * (mid - 14);
+    ctx.fillStyle = x >= 0 ? (i === v.length - 1 ? '#7fff6e' : 'rgba(127,255,110,.45)') : (i === v.length - 1 ? '#ff4d6e' : 'rgba(255,77,110,.45)');
+    ctx.fillRect(i * bw + bw * 0.18, x >= 0 ? mid - h : mid, bw * 0.64, h);
+    ctx.fillStyle = '#5a6480';
+    ctx.fillText(w[i].date.slice(5), i * bw + bw / 2, H - 2);
+  });
+}
+function ago(ts) {
+  if (!ts) return '';
+  const m = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+  return m < 60 ? m + 'm ago' : Math.round(m / 60) + 'h ago';
+}
+function esc(t) { return String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]); }
+async function fetchOilNews() {
+  const ul = document.getElementById('oil-news');
+  try {
+    const d = await fetch('/api/oil/news').then(r => r.json());
+    const it = d.items || [];
+    ul.innerHTML = it.length ? it.map(x => '<li class="' + (x.ts && Date.now()/1000 - x.ts < 3600 ? 'fresh' : '') + '"><span class="nt">' + ago(x.ts) + '</span><span><a href="' + esc(x.link) + '" target="_blank" rel="noopener">' + esc(x.title) + '</a><span class="ns">' + esc(x.source) + '</span></span></li>').join('')
+      : '<li class="ss">No oil headlines in the last 24h.</li>';
+    document.getElementById('oil-news-upd').textContent = '· updated ' + new Date().toLocaleTimeString();
+  } catch (e) { ul.innerHTML = '<li class="ss">News feed unavailable.</li>'; }
+}
+
 function startPriceFeed() {
+  fetchCot(); fetchOilNews();
+  setInterval(fetchOilNews, 5 * 60000);
+  setInterval(fetchCot, 60 * 60000);
+  window.addEventListener('resize', () => { fetchCot(); });
   fetchPrices().finally(fetchGammaFlip);
   fetchCandles();
   if (priceState.interval) clearInterval(priceState.interval);

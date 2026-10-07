@@ -8,12 +8,11 @@ container. The order is remembered per page in the browser (localStorage).
 REORDER_WIDGET = r"""
 <!-- Panel reorder arrows (injected by reorder.py) -->
 <style>
-.ro-ctl{position:absolute;top:4px;right:4px;z-index:5;display:flex;gap:2px;opacity:.45;transition:opacity .15s}
-.ro-unit:hover>.ro-ctl,.ro-ctl:focus-within{opacity:1}
-.ro-ctl button{all:unset;cursor:pointer;width:20px;height:18px;line-height:18px;text-align:center;font-size:10px;
-  border-radius:4px;background:rgba(127,140,180,.18);color:#c8d0ea;font-family:system-ui,sans-serif}
-.ro-ctl button:hover{background:rgba(127,255,110,.3);color:#fff}
-.ro-ctl button[disabled]{opacity:.25;cursor:default;background:rgba(127,140,180,.08)}
+.ro-ctl{position:absolute;top:6px;right:6px;z-index:20;display:flex;gap:4px}
+.ro-ctl button{all:unset;box-sizing:border-box;cursor:pointer;width:26px;height:24px;line-height:22px;text-align:center;font-size:13px;font-weight:700;
+  border-radius:5px;background:#1a2040;border:1px solid #7fff6e;color:#7fff6e;font-family:system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+.ro-ctl button:hover{background:#7fff6e;color:#060810}
+.ro-ctl button[disabled]{opacity:.3;cursor:default;border-color:#5a6480;color:#5a6480;background:#0d1120}
 .ro-flash{outline:1px solid rgba(127,255,110,.6);outline-offset:2px;transition:outline-color .6s}
 </style>
 <script id="ro-script">
