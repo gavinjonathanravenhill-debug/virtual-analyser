@@ -19,8 +19,11 @@ header{display:flex;align-items:flex-start;justify-content:space-between;margin-
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .price-panel{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:18px;display:grid;grid-template-columns:140px 170px 170px 170px 1fr;gap:22px;align-items:center}
 @media(max-width:1100px){.price-panel{grid-template-columns:repeat(4,1fr)}.price-panel .corr-box{grid-column:1/-1}}
-.oil-g{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}@media(max-width:900px){.oil-g{grid-template-columns:1fr 1fr}}
-.oil-news{list-style:none;margin:0;padding:0;max-height:330px;overflow-y:auto}.oil-news li{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.4}
+.oil-row{margin-bottom:18px}.oil-row .card{padding:14px 16px}
+.cot-mini{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.cot-mini>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cot-mini .sl{font-size:9px;letter-spacing:1px;margin:0}.cot-mini b{font-size:15px;font-weight:800}.cot-mini i{font-style:normal;font-family:var(--mono);font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:700px){.cot-mini{grid-template-columns:repeat(3,1fr)}}
+.oil-news{list-style:none;margin:0;padding:0;max-height:190px;overflow-y:auto}.oil-news li{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.4}
 .oil-news li:last-child{border-bottom:0}.oil-news .nt{font-family:var(--mono);font-size:10px;color:var(--muted);min-width:54px;padding-top:2px}.oil-news a{color:var(--text);text-decoration:none}.oil-news a:hover{color:var(--accent)}.oil-news .ns{font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:6px}
 .oil-news li.fresh .nt{color:var(--accent)}
 @media(max-width:700px){.price-panel{grid-template-columns:1fr 1fr}}
@@ -169,26 +172,6 @@ input:focus{border-color:var(--accent)}
   </div>
 </div>
 
-<!-- Oil: who is positioned (CFTC COT) -->
-<div class="card" id="oil-cot-card" style="margin-bottom:18px">
-  <div class="ct">OIL · WHO'S POSITIONED · CFTC COMMITMENTS OF TRADERS (WTI)</div>
-  <div class="oil-g">
-    <div class="stat"><div class="sl">FUNDS NET (MANAGED MONEY)</div><div class="sv" id="cot-mm">—</div><div class="ss" id="cot-mm-chg">—</div></div>
-    <div class="stat"><div class="sl">FUNDS LONG / SHORT</div><div class="sv" id="cot-ls">—</div><div class="ss" id="cot-ls-sub">—</div></div>
-    <div class="stat"><div class="sl">PRODUCERS NET</div><div class="sv" id="cot-pm">—</div><div class="ss" id="cot-pm-chg">—</div></div>
-    <div class="stat"><div class="sl">SWAP DEALERS NET</div><div class="sv" id="cot-sw">—</div><div class="ss" id="cot-sw-chg">—</div></div>
-    <div class="stat"><div class="sl">OPEN INTEREST</div><div class="sv" id="cot-oi">—</div><div class="ss" id="cot-oi-chg">—</div></div>
-  </div>
-  <canvas id="cot-canvas" style="width:100%;height:120px;display:block"></canvas>
-  <div class="ss" id="cot-note" style="margin-top:8px">Loading CFTC data…</div>
-</div>
-
-<!-- Oil news -->
-<div class="card" id="oil-news-card" style="margin-bottom:18px">
-  <div class="ct">OIL NEWS · LAST 24H <span id="oil-news-upd" style="letter-spacing:1px"></span></div>
-  <ul class="oil-news" id="oil-news"><li class="ss">Loading…</li></ul>
-</div>
-
 <!-- GammaFlip panel with chart -->
 <div class="card" style="margin-bottom:18px">
   <div class="ct">BTC GAMMA EXPOSURE · GAMMAFLIP</div>
@@ -215,6 +198,26 @@ input:focus{border-color:var(--accent)}
   <div class="ss" id="gf-updated" style="margin-top:10px;font-size:10px">Loading GammaFlip data…</div>
 </div>
 
+
+<!-- Oil: positioning (compact) + news, side by side under gamma -->
+<div class="g2 oil-row">
+<div class="card" id="oil-cot-card">
+  <div class="ct" style="margin-bottom:10px">OIL · WHO'S POSITIONED (CFTC, WTI)</div>
+  <div class="cot-mini">
+    <div><span class="sl">FUNDS NET</span><b id="cot-mm">—</b><i id="cot-mm-chg"></i></div>
+    <div><span class="sl">FUNDS L/S</span><b id="cot-ls">—</b><i id="cot-ls-sub"></i></div>
+    <div><span class="sl">PRODUCERS</span><b id="cot-pm">—</b><i id="cot-pm-chg"></i></div>
+    <div><span class="sl">SWAP DEALERS</span><b id="cot-sw">—</b><i id="cot-sw-chg"></i></div>
+    <div><span class="sl">OPEN INT.</span><b id="cot-oi">—</b><i id="cot-oi-chg"></i></div>
+  </div>
+  <canvas id="cot-canvas" style="width:100%;height:56px;display:block;margin-top:8px"></canvas>
+  <div class="ss" id="cot-note" style="margin-top:6px">Loading CFTC data…</div>
+</div>
+<div class="card" id="oil-news-card">
+  <div class="ct" style="margin-bottom:10px">OIL NEWS · LAST 24H <span id="oil-news-upd" style="letter-spacing:1px"></span></div>
+  <ul class="oil-news" id="oil-news"><li class="ss">Loading…</li></ul>
+</div>
+</div>
 
 <!-- Fetch bar -->
 <div class="fetch-row" style="display:none">
@@ -446,10 +449,10 @@ async function fetchCot() {
     set('cot-sw', L.swap_net); chgTxt(document.getElementById('cot-sw-chg'), L.swap_net_chg);
     document.getElementById('cot-oi').textContent = kfmt(L.oi); chgTxt(document.getElementById('cot-oi-chg'), L.oi_chg);
     document.getElementById('cot-ls').textContent = L.mm_ls_ratio ? L.mm_ls_ratio + '×' : '—';
-    document.getElementById('cot-ls-sub').textContent = kfmt(L.mm_long) + ' L (' + (L.mm_long_chg >= 0 ? '+' : '−') + kfmt(Math.abs(L.mm_long_chg)) + ') · ' + kfmt(L.mm_short) + ' S (' + (L.mm_short_chg >= 0 ? '+' : '−') + kfmt(Math.abs(L.mm_short_chg)) + ')';
+    document.getElementById('cot-ls-sub').textContent = kfmt(L.mm_long) + ' L · ' + kfmt(L.mm_short) + ' S';
     const dir = L.mm_net_chg > 0 ? 'funds ADDED to net longs' : L.mm_net_chg < 0 ? 'funds CUT net longs' : 'funds unchanged';
     const pos = L.mm_net_pctile >= 80 ? ' — near the most bullish of the last ' + w.length + ' weeks' : L.mm_net_pctile <= 20 ? ' — near the most bearish of the last ' + w.length + ' weeks' : '';
-    document.getElementById('cot-note').textContent = 'Positions as of Tue ' + L.date + ' (published Fri). Last week ' + dir + pos + '. Bars: funds net position, ' + w.length + ' weeks.';
+    document.getElementById('cot-note').textContent = 'As of Tue ' + L.date + ' · ' + dir + pos + ' · bars = funds net, ' + w.length + ' wks';
     drawCot(w);
   } catch (e) { document.getElementById('cot-note').textContent = 'CFTC feed error.'; }
 }
@@ -459,15 +462,15 @@ function drawCot(w) {
   cv.width = W * dpr; cv.height = H * dpr;
   const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr); ctx.clearRect(0, 0, W, H);
   const v = w.map(x => x.mm_net), mx = Math.max(1, ...v.map(Math.abs));
-  const mid = H / 2, bw = W / v.length;
+  const mid = H / 2, bw = W / v.length;  // compact: no date labels
   ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
   ctx.font = '9px Space Mono, monospace'; ctx.textAlign = 'center';
   v.forEach((x, i) => {
-    const h = (Math.abs(x) / mx) * (mid - 14);
+    const h = (Math.abs(x) / mx) * (mid - 3);
     ctx.fillStyle = x >= 0 ? (i === v.length - 1 ? '#7fff6e' : 'rgba(127,255,110,.45)') : (i === v.length - 1 ? '#ff4d6e' : 'rgba(255,77,110,.45)');
     ctx.fillRect(i * bw + bw * 0.18, x >= 0 ? mid - h : mid, bw * 0.64, h);
     ctx.fillStyle = '#5a6480';
-    ctx.fillText(w[i].date.slice(5), i * bw + bw / 2, H - 2);
+    
   });
 }
 function ago(ts) {
